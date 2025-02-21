@@ -20,9 +20,9 @@ const ESP32_IP = '192.168.136.162';
 const WEBSOCKET_URL = `ws://${ESP32_IP}:81`;
 
 const parkingLocations: ParkingLocation[] = [
-  { id: "1", name: "Downtown Parking", address: "123 Main St", availableSpaces: 30, totalSpaces: 30 },
-  { id: "2", name: "Mall Parking", address: "456 Shop Ave", availableSpaces: 1, totalSpaces: 1, isSensorEnabled: true },
-  { id: "3", name: "Airport Parking", address: "789 Fly Rd", availableSpaces: 30, totalSpaces: 30 },
+  { id: "1", name: "Express Avenue", address: "Thousand Lights", availableSpaces: 30, totalSpaces: 30 },
+  { id: "2", name: "Pothys", address: "TNagar", availableSpaces: 1, totalSpaces: 1, isSensorEnabled: true },
+  { id: "3", name: "Chennai Airport Parking", address: "Tirusulam", availableSpaces: 30, totalSpaces: 30 },
 ]
 
 const GlowingBorderCard = ({ children, isConnected = true, isSensorCard = false }: { children: React.ReactNode, isConnected?: boolean, isSensorCard?: boolean }) => {
@@ -83,39 +83,30 @@ export default function ParkingLocations() {
 
         wsInstance.onmessage = (event) => {
           try {
+            console.log('Received message:', event.data);
+            
             if (event.data === 'heartbeat') {
               setLastHeartbeat(new Date());
               return;
             }
 
-            const data = JSON.parse(event.data);
-            
-            switch (data.type) {
-              case 'spaceUpdate':
-                if (data.locationId === parkingLocations[0].id) {
-                  setSpaceStates(prev => {
-                    const newStates = [...prev];
-                    newStates[data.spaceId] = data.isOccupied;
-                    return newStates;
-                  });
-                  setLastUpdateTime(new Date().toLocaleTimeString());
+            // Handle the string format: "1:true" or "1:false"
+            const [spaceId, status] = event.data.split(':');
+            if (spaceId === '1') {
+              const isSpaceOccupied = status === 'true';
+              setSpaceStates(prev => {
+                const newStates = { ...prev };
+                if (Array.isArray(newStates["2"])) {
+                  newStates["2"] = [...newStates["2"]];
+                  newStates["2"][0] = isSpaceOccupied;
                 }
-                break;
-                
-              case 'sensorData':
-                if (data.spaceId === 1) {
-                  setSpaceStates(prev => {
-                    const newStates = [...prev];
-                    newStates[0] = data.isOccupied;
-                    return newStates;
-                  });
-                  setLastUpdateTime(new Date().toLocaleTimeString());
-                }
-                break;
+                return newStates;
+              });
+              setLastUpdateTime(new Date().toLocaleTimeString());
             }
           } catch (error) {
-            console.error('Error parsing sensor data:', error);
-            setErrorMessage('Error reading sensor data');
+            console.error('Error processing message:', error);
+            setErrorMessage('Error processing update');
           }
         };
 
