@@ -42,101 +42,135 @@ const GlowingBorderCard = ({ children, isConnected = true, isSensorCard = false 
 
 export default function ParkingLocations() {
   const [wsConnected, setWsConnected] = useState(false)
+  const [spaceStates, setSpaceStates] = useState<boolean[]>([false, false, false])
+  const [lastHeartbeat, setLastHeartbeat] = useState<Date | null>(null)
+  const [lastUpdateTime, setLastUpdateTime] = useState<string>("")
+  const [selectedSpace, setSelectedSpace] = useState<number | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [wsInstance, setWsInstance] = useState<WebSocket | null>(null)
+  const [reconnectAttempts, setReconnectAttempts] = useState(0)
+  const [connectionStatus, setConnectionStatus] = useState('disconnected')
 
   useEffect(() => {
-    let ws: WebSocket;
+    let wsInstance: WebSocket;
     let reconnectTimer: NodeJS.Timeout;
 
     function connectWebSocket() {
       try {
-        console.log('Attempting to connect to WebSocket server at:', WEBSOCKET_URL)
-        ws = new WebSocket(WEBSOCKET_URL)
+        wsInstance = new WebSocket(WEBSOCKET_URL);
+        setWsInstance(wsInstance);
 
-        ws.onopen = () => {
-          console.log('Successfully connected to ESP32')
-          setWsConnected(true)
-        }
+        wsInstance.onopen = () => {
+          console.log('WebSocket connected');
+          setWsConnected(true);
+          setConnectionStatus('connected');
+          setErrorMessage('');
+          setReconnectAttempts(0);
+        };
 
-        ws.onclose = (event) => {
-          console.log('WebSocket connection closed:', {
-            code: event.code,
-            reason: event.reason,
-            wasClean: event.wasClean
-          })
-          setWsConnected(false)
-          // Try to reconnect every 2 seconds
-          reconnectTimer = setTimeout(connectWebSocket, 2000)
-        }
-
-        ws.onerror = (error) => {
-          console.error('WebSocket error details:', {
-            error,
-            readyState: ws?.readyState,
-            url: WEBSOCKET_URL,
-            timestamp: new Date().toISOString()
-          })
+        wsInstance.onclose = () => {
+          console.log('WebSocket disconnected');
+          setWsConnected(false);
+          setConnectionStatus('disconnected');
           
-          // Check if the ESP32 IP is in the correct format
-          if (!ESP32_IP.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
-            console.error('Invalid ESP32 IP address format:', ESP32_IP)
+          // Attempt to reconnect
+          const backoffTime = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
+          reconnectTimer = setTimeout(() => {
+            setReconnectAttempts(prev => prev + 1);
+            connectWebSocket();
+          }, backoffTime);
+        };
+
+        wsInstance.onmessage = (event) => {
+          try {
+            if (event.data === 'heartbeat') {
+              setLastHeartbeat(new Date());
+              return;
+            }
+
+            const data = JSON.parse(event.data);
+            
+            switch (data.type) {
+              case 'spaceUpdate':
+                if (data.locationId === parkingLocations[0].id) {
+                  setSpaceStates(prev => {
+                    const newStates = [...prev];
+                    newStates[data.spaceId] = data.isOccupied;
+                    return newStates;
+                  });
+                  setLastUpdateTime(new Date().toLocaleTimeString());
+                }
+                break;
+                
+              case 'sensorData':
+                if (data.spaceId === 1) {
+                  setSpaceStates(prev => {
+                    const newStates = [...prev];
+                    newStates[0] = data.isOccupied;
+                    return newStates;
+                  });
+                  setLastUpdateTime(new Date().toLocaleTimeString());
+                }
+                break;
+            }
+          } catch (error) {
+            console.error('Error parsing sensor data:', error);
+            setErrorMessage('Error reading sensor data');
           }
-          
-          // Additional connection diagnostics
-          console.log('Connection diagnostics:', {
-            wsStatus: ws?.readyState,
-            connected: wsConnected,
-            protocol: ws?.protocol,
-            extensions: ws?.extensions
-          })
+        };
 
-          ws.close()
-        }
-
-        // Add message event logging
-        ws.onmessage = (event) => {
-          console.log('Received WebSocket message:', event.data)
-        }
-
+        return wsInstance;
       } catch (error) {
-        console.error('Failed to establish WebSocket connection:', {
-          error,
-          url: WEBSOCKET_URL,
-          timestamp: new Date().toISOString()
-        })
-        setWsConnected(false)
+        console.error('Failed to establish WebSocket connection:', error);
+        setWsConnected(false);
+        return null;
       }
     }
 
-    connectWebSocket()
-
-    // Connection health check
-    const healthCheck = setInterval(() => {
-      if (ws?.readyState === WebSocket.OPEN) {
-        try {
-          ws.send('ping')
-        } catch (error) {
-          console.error('Health check failed:', error)
-          ws.close()
-        }
-      }
-    }, 5000)
-
-    // Cleanup on component unmount
+    const ws = connectWebSocket();
+    
     return () => {
-      console.log('Cleaning up WebSocket connection')
-      if (ws) {
-        ws.close()
+      if (wsInstance) {
+        wsInstance.close();
       }
       if (reconnectTimer) {
-        clearTimeout(reconnectTimer)
+        clearTimeout(reconnectTimer);
       }
-      clearInterval(healthCheck)
+    };
+  }, [reconnectAttempts]);
+
+  const handlePayment = () => {
+    if (selectedSpace === null) return;
+    
+    const newStates = [...spaceStates];
+    newStates[selectedSpace] = true;
+    setSpaceStates(newStates);
+    
+    // Broadcast the state change to all connected clients
+    if (wsInstance?.readyState === WebSocket.OPEN) {
+      try {
+        wsInstance.send(JSON.stringify({
+          type: 'spaceUpdate',
+          spaceId: selectedSpace,
+          isOccupied: true,
+          locationId: parkingLocations[0].id,
+          timestamp: new Date().toISOString()
+        }));
+      } catch (error) {
+        console.error('Failed to broadcast space state:', error);
+      }
     }
-  }, []) // Empty dependency array means this runs once on mount
+  };
 
   return (
     <div className="container mx-auto px-4 py-8">
       <h2 className="text-2xl font-bold mb-6 text-white">Available Parking Locations</h2>
+      <div className="mb-4 p-4 rounded-lg bg-black/30 text-white">
+        <p>ESP32 Connection Status:</p>
+        <p className="text-sm opacity-70">Attempting to connect to: {WEBSOCKET_URL}</p>
+        <p className="text-sm opacity-70">Status: {wsConnected ? 'Connected' : 'Disconnected'}</p>
+        <p className="text-xs opacity-50 mt-2">If connection fails, verify the ESP32 IP address in Serial Monitor</p>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {parkingLocations.map((location) => (
           <motion.div
