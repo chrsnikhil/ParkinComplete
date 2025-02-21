@@ -1,5 +1,6 @@
 "use client"
 
+import React from "react"
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Car, X } from "lucide-react"
@@ -9,193 +10,115 @@ import { Car, X } from "lucide-react"
 const ESP32_IP = '192.168.136.162';
 const WEBSOCKET_URL = `ws://${ESP32_IP}:81`;
 
+const SENSOR_CONTROLLED_SPACE = 0; // First space is controlled by sensor
+
 type ParkingSpaceBookingProps = {
   locationId: string
   locationName: string
   totalSpaces: number
   isSensorEnabled?: boolean
+  wsUrl?: string
+  initialOccupied?: boolean
 }
 
 export default function ParkingSpaceBooking({ 
   locationId, 
   locationName,
   totalSpaces,
-  isSensorEnabled 
+  isSensorEnabled,
+  wsUrl = WEBSOCKET_URL,
+  initialOccupied = false
 }: ParkingSpaceBookingProps) {
   const [wsConnected, setWsConnected] = useState(false)
-  const [spaceStates, setSpaceStates] = useState<boolean[]>(
-    Array(totalSpaces).fill(false)
-  )
-  const [selectedSpace, setSelectedSpace] = useState<number | null>(null)
+  const [isOccupied, setIsOccupied] = useState(initialOccupied)
+  const [lastUpdateTime, setLastUpdateTime] = useState<string>("")
+  const [wsInstance, setWsInstance] = useState<WebSocket | null>(null)
+  const [reconnectAttempts, setReconnectAttempts] = useState(0)
+  const [connectionStatus, setConnectionStatus] = useState('disconnected')
   const [showPayment, setShowPayment] = useState(false)
   const [paymentVerified, setPaymentVerified] = useState(false)
   const [verificationTimer, setVerificationTimer] = useState(60)
-  const [lastSensorUpdate, setLastSensorUpdate] = useState<Date | null>(null)
-  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected')
-  const [lastUpdateTime, setLastUpdateTime] = useState<string>('')
-  const [wsInstance, setWsInstance] = useState<WebSocket | null>(null)
-  const [errorMessage, setErrorMessage] = useState<string>('')
-  const [reconnectAttempts, setReconnectAttempts] = useState(0)
-  const [lastHeartbeat, setLastHeartbeat] = useState<Date | null>(null)
   const [transactionDetails, setTransactionDetails] = useState<{
     id: string;
     timestamp: string;
     amount: string;
   } | null>(null);
 
-  // Function to check server status
-  const checkServerStatus = () => {
-    if (wsInstance?.readyState === WebSocket.OPEN) {
-      try {
-        wsInstance.send('heartbeat')
-        setLastHeartbeat(new Date())
-      } catch (error) {
-        console.error('Failed to send heartbeat:', error)
-        setConnectionStatus('disconnected')
-        setErrorMessage('Lost connection to server')
-        wsInstance.close()
-      }
-    }
-  }
-
-  // Function to handle reconnection
-  const connectWebSocket = () => {
-    // Close existing connection if any
-    if (wsInstance) {
-      wsInstance.close()
-      setWsInstance(null)
-    }
-
-    try {
-      setConnectionStatus('connecting')
-      setErrorMessage('')
-      const ws = new WebSocket(WEBSOCKET_URL)
-      setWsInstance(ws)
-
-      ws.onopen = () => {
-        console.log('Connected to ESP32')
-        setWsConnected(true)
-        setConnectionStatus('connected')
-        setReconnectAttempts(0)
-        setErrorMessage('')
-        setLastHeartbeat(new Date())
-        // Send initial heartbeat
-        ws.send('heartbeat')
-      }
-
-      ws.onclose = (event) => {
-        console.log('Disconnected from ESP32:', event.code, event.reason)
-        setWsConnected(false)
-        setConnectionStatus('disconnected')
-        setWsInstance(null)
-        setErrorMessage(`Connection closed (Code: ${event.code})${event.reason ? ` - ${event.reason}` : ''}`)
-        setReconnectAttempts(prev => prev + 1)
-        setLastHeartbeat(null)
-      }
-
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error)
-        setConnectionStatus('disconnected')
-        setWsInstance(null)
-        setErrorMessage('Failed to connect to sensor. Please check if ESP32 is powered on and connected to WiFi.')
-        setReconnectAttempts(prev => prev + 1)
-        setLastHeartbeat(null)
-      }
-
-      ws.onmessage = (event) => {
-        try {
-          if (event.data === 'heartbeat') {
-            setLastHeartbeat(new Date())
-            return
-          }
-
-          const [spaceId, status] = event.data.split(':')
-          if (spaceId === '1') {  // We only care about space 1 for now
-            const isOccupied = status === 'true'
-            setSpaceStates(prev => {
-              const newStates = [...prev]
-              newStates[0] = isOccupied
-              return newStates
-            })
-            setLastSensorUpdate(new Date())
-            setLastUpdateTime(new Date().toLocaleTimeString())
-            setErrorMessage('')
-          }
-        } catch (error) {
-          console.error('Error parsing sensor data:', error)
-          setErrorMessage('Error reading sensor data')
-        }
-      }
-
-      return ws
-    } catch (error) {
-      console.error('Failed to connect:', error)
-      setWsConnected(false)
-      setConnectionStatus('disconnected')
-      setWsInstance(null)
-      setErrorMessage('Failed to establish connection')
-      setReconnectAttempts(prev => prev + 1)
-      setLastHeartbeat(null)
-      return null
-    }
-  }
-
-  // Function to manually trigger reconnection
-  const handleReconnect = () => {
-    setReconnectAttempts(0)
-    connectWebSocket()
-  }
-
   useEffect(() => {
-    if (!isSensorEnabled) return
+    if (!isSensorEnabled) return;
 
-    // Initial connection
-    const ws = connectWebSocket()
+    let wsInstance: WebSocket;
+    let reconnectTimer: NodeJS.Timeout;
 
-    // Send heartbeat every 2 seconds
-    const heartbeatInterval = setInterval(checkServerStatus, 2000)
+    function connectWebSocket() {
+      try {
+        wsInstance = new WebSocket(wsUrl);
+        setWsInstance(wsInstance);
 
-    // Check for stale connection every second
-    const statusCheckInterval = setInterval(() => {
-      if (lastHeartbeat) {
-        const timeSinceLastHeartbeat = new Date().getTime() - lastHeartbeat.getTime()
-        if (timeSinceLastHeartbeat > 5000) { // No heartbeat for 5 seconds
-          console.log('Connection appears stale, reconnecting...')
-          setConnectionStatus('disconnected')
-          setErrorMessage('Connection timeout - no response from server')
-          if (wsInstance) {
-            wsInstance.close()
+        wsInstance.onopen = () => {
+          console.log('WebSocket connected');
+          setWsConnected(true);
+          setConnectionStatus('connected');
+        };
+
+        wsInstance.onclose = () => {
+          console.log('WebSocket disconnected');
+          setWsConnected(false);
+          setConnectionStatus('disconnected');
+          
+          // Attempt to reconnect
+          const backoffTime = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
+          reconnectTimer = setTimeout(() => {
+            setReconnectAttempts(prev => prev + 1);
+            connectWebSocket();
+          }, backoffTime);
+        };
+
+        wsInstance.onmessage = (event) => {
+          try {
+            console.log('Received message:', event.data);
+            // Handle the string format: "1:true" or "1:false"
+            const [spaceId, status] = event.data.split(':');
+            if (spaceId === '1') {
+              const isSpaceOccupied = status === 'true';
+              setIsOccupied(isSpaceOccupied);
+              setLastUpdateTime(new Date().toLocaleTimeString());
+              // Ensure connection status is set when receiving messages
+              setWsConnected(true);
+              setConnectionStatus('connected');
+            }
+          } catch (error) {
+            console.error('Error processing message:', error);
           }
-        }
-      }
-    }, 1000)
+        };
 
-    // Attempt to reconnect more frequently initially, then back off
-    const reconnectInterval = setInterval(() => {
-      if (!wsInstance || wsInstance.readyState === WebSocket.CLOSED) {
-        const backoffTime = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000)
-        console.log(`Attempting to reconnect... (Attempt ${reconnectAttempts + 1})`)
-        setTimeout(connectWebSocket, backoffTime)
-      }
-    }, 2000)
-
-    // Cleanup
-    return () => {
-      clearInterval(heartbeatInterval)
-      clearInterval(statusCheckInterval)
-      clearInterval(reconnectInterval)
-      if (wsInstance) {
-        wsInstance.close()
+        return wsInstance;
+      } catch (error) {
+        console.error('Failed to establish WebSocket connection:', error);
+        setWsConnected(false);
+        setConnectionStatus('disconnected');
+        return null;
       }
     }
-  }, [isSensorEnabled, reconnectAttempts, lastHeartbeat])
 
+    const ws = connectWebSocket();
+    
+    return () => {
+      if (wsInstance) {
+        wsInstance.close();
+      }
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+    };
+  }, [wsUrl, isSensorEnabled, reconnectAttempts]);
+
+  // Payment verification timer effect
   useEffect(() => {
     let timer: NodeJS.Timeout;
     let countdownTimer: NodeJS.Timeout;
 
     if (showPayment && !paymentVerified) {
-      // Keep the actual verification at 30 seconds
       timer = setTimeout(() => {
         const timestamp = new Date().toLocaleString();
         setTransactionDetails({
@@ -204,28 +127,22 @@ export default function ParkingSpaceBooking({
           amount: '₹30.00'
         });
         setPaymentVerified(true);
-        handlePayment();
       }, 30000);
 
-      // Update the countdown every second, starting from 60
       countdownTimer = setInterval(() => {
-        setVerificationTimer(prev => {
-          // Only count down to 0, not negative
-          return prev > 0 ? prev - 1 : 0
-        })
-      }, 1000)
+        setVerificationTimer(prev => prev > 0 ? prev - 1 : 0);
+      }, 1000);
     }
 
     return () => {
-      clearTimeout(timer)
-      clearInterval(countdownTimer)
-      setVerificationTimer(60)
-    }
-  }, [showPayment])
+      clearTimeout(timer);
+      clearInterval(countdownTimer);
+      setVerificationTimer(60);
+    };
+  }, [showPayment]);
 
   const handleSpaceClick = (index: number) => {
-    if (spaceStates[index]) return;
-    setSelectedSpace(index)
+    if (index === SENSOR_CONTROLLED_SPACE && !wsConnected) return;
     setShowPayment(true)
     setPaymentVerified(false)
     setVerificationTimer(60)
@@ -233,20 +150,35 @@ export default function ParkingSpaceBooking({
   }
 
   const handlePayment = () => {
-    if (selectedSpace === null) return;
+    if (SENSOR_CONTROLLED_SPACE === null) return;
     
-    const newStates = [...spaceStates]
-    newStates[selectedSpace] = true
-    setSpaceStates(newStates)
+    setIsOccupied(true)
   }
 
   const handleClosePayment = () => {
     setShowPayment(false)
-    setSelectedSpace(null)
     setPaymentVerified(false)
     setVerificationTimer(60)
     setTransactionDetails(null)
   }
+
+  // Update the space display to reflect real-time sensor state
+  const getSpaceClassName = (index: number) => {
+    if (!isSensorEnabled) return 'bg-green-500 hover:bg-green-600';
+    if (index === 0) { // First space is controlled by sensor
+      return isOccupied 
+        ? 'bg-red-500 cursor-not-allowed'
+        : 'bg-green-500 hover:bg-green-600';
+    }
+    return 'bg-green-500 hover:bg-green-600';
+  };
+
+  // Update the space display to show real-time status
+  const isSpaceAvailable = (index: number) => {
+    if (!isSensorEnabled) return true;
+    if (index === 0) return !isOccupied;
+    return true;
+  };
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -254,45 +186,18 @@ export default function ParkingSpaceBooking({
         <h2 className="text-3xl font-bold text-white">{locationName}</h2>
         {isSensorEnabled && (
           <div className="flex items-center gap-4">
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-3 bg-black/30 px-4 py-2 rounded-full">
-                <div className={`w-3 h-3 rounded-full ${
-                  connectionStatus === 'connected' ? 'bg-green-500 animate-pulse shadow-[0_0_10px_2px_rgba(34,197,94,0.6)] ring-2 ring-green-500/50' :
-                  connectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' :
-                  'bg-red-500'
-                } shadow-lg shadow-current`} />
-                <span className={`text-sm font-medium ${
-                  connectionStatus === 'connected' ? 'text-green-400' :
-                  connectionStatus === 'connecting' ? 'text-yellow-400' :
-                  'text-red-400'
-                }`}>
-                  {connectionStatus === 'connected' ? 'Sensor Live' :
-                   connectionStatus === 'connecting' ? 'Connecting...' :
-                   'Sensor Offline'}
-                </span>
-              </div>
-              {errorMessage && (
-                <div className="text-xs text-red-400 px-4">
-                  {errorMessage}
-                </div>
-              )}
-              {lastHeartbeat && connectionStatus === 'connected' && (
-                <div className="text-xs text-green-400 px-4 flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
-                  Last heartbeat: {new Date(lastHeartbeat).toLocaleTimeString()}
-                </div>
-              )}
+            <div className="flex items-center gap-3 bg-black/30 px-4 py-2 rounded-full">
+              <div className={`w-3 h-3 rounded-full ${
+                connectionStatus === 'connected'
+                  ? 'bg-green-500 animate-pulse shadow-[0_0_10px_2px_rgba(34,197,94,0.6)] ring-2 ring-green-500/50' 
+                  : 'bg-red-500'
+              } shadow-lg shadow-current`} />
+              <span className={`text-sm font-medium ${connectionStatus === 'connected' ? 'text-green-400' : 'text-red-400'}`}>
+                {connectionStatus === 'connected' ? 'Sensor Live' : 'Sensor Offline'}
+              </span>
             </div>
-            {connectionStatus !== 'connected' && (
-              <button
-                onClick={handleReconnect}
-                className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-full text-sm font-medium transition-colors flex items-center gap-2"
-              >
-                Reconnect {reconnectAttempts > 0 && `(${reconnectAttempts})`}
-              </button>
-            )}
             {lastUpdateTime && connectionStatus === 'connected' && (
-              <div className="text-sm text-white/60">
+              <div className="text-sm text-green-400">
                 Last update: {lastUpdateTime}
               </div>
             )}
@@ -300,77 +205,42 @@ export default function ParkingSpaceBooking({
         )}
       </div>
 
-      <div className={`
-        ${isSensorEnabled 
-          ? 'flex justify-center items-center min-h-[60vh]' 
-          : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 p-8 bg-black/20 rounded-2xl'
-        }
-      `}>
-        {Array.from({ length: totalSpaces }).map((_, index) => (
-          <motion.div
-            key={index}
-            whileHover={!spaceStates[index] ? { 
-              scale: 1.1,
-              rotate: 2,
-              transition: { type: "spring", stiffness: 300, damping: 10 }
-            } : undefined}
-            whileTap={!spaceStates[index] ? { scale: 0.95 } : undefined}
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <motion.div
+          className={`
+            w-64 h-64
+            rounded-2xl flex flex-col items-center justify-center
+            relative overflow-hidden
+            ${isOccupied 
+              ? 'bg-red-500 cursor-not-allowed' 
+              : 'bg-green-500'
+            }
+            transition-all duration-300 ease-out
+            ${wsConnected 
+              ? isOccupied
+                ? 'shadow-[0_0_15px_rgba(239,68,68,0.5)]'
+                : 'shadow-[0_0_15px_rgba(34,197,94,0.5)]'
+              : 'shadow-[0_0_15px_rgba(148,163,184,0.5)]'
+            }
+          `}
+        >
+          <Car 
             className={`
-              ${isSensorEnabled ? 'w-64 h-64' : 'w-full h-32 sm:h-40'}
-              rounded-2xl flex flex-col items-center justify-center cursor-pointer
-              relative overflow-hidden
-              ${spaceStates[index] 
-                ? 'bg-gray-500 cursor-not-allowed' 
-                : selectedSpace === index && showPayment
-                ? 'bg-yellow-500'
-                : 'bg-green-500 hover:bg-green-600 transform-gpu'
-              }
-              transition-all duration-300 ease-out
-              ${spaceStates[index] ? '' : 'hover:shadow-[0_0_20px_rgba(34,197,94,0.5)]'}
-              ${connectionStatus === 'connected' 
-                ? 'shadow-[0_0_15px_rgba(34,197,94,0.5)]' 
-                : connectionStatus === 'connecting'
-                ? 'shadow-[0_0_15px_rgba(234,179,8,0.5)]'
-                : 'shadow-[0_0_15px_rgba(239,68,68,0.5)]'}
+              w-20 h-20
+              relative z-10
+              ${isOccupied ? 'text-red-100' : 'text-white'}
             `}
-            onClick={() => handleSpaceClick(index)}
-          >
-            {selectedSpace === index && (
-              <motion.div
-                className="absolute inset-0 bg-gradient-to-r from-yellow-400 to-yellow-600"
-                animate={{
-                  opacity: [0.5, 1, 0.5],
-                  scale: [1, 1.2, 1],
-                }}
-                transition={{
-                  duration: 2,
-                  repeat: Infinity,
-                  ease: "easeInOut"
-                }}
-              />
-            )}
-            <Car 
-              className={`
-                ${isSensorEnabled ? 'w-20 h-20' : 'w-12 h-12'}
-                relative z-10
-                ${spaceStates[index] ? 'text-gray-300' : 'text-white'}
-                ${selectedSpace === index ? 'animate-pulse' : ''}
-              `}
-            />
-            <span className={`
-              text-white font-medium mt-4 relative z-10
-              ${isSensorEnabled ? 'text-xl' : 'text-sm'}
-            `}>
-              Space {index + 1}
-            </span>
-            {spaceStates[index] && (
-              <span className="text-white/80 text-sm mt-2 relative z-10">Occupied</span>
-            )}
-            {!spaceStates[index] && connectionStatus === 'connected' && (
-              <div className="absolute inset-0 bg-green-500/10 animate-pulse"></div>
-            )}
-          </motion.div>
-        ))}
+          />
+          <span className="text-white font-medium mt-4 relative z-10 text-xl">
+            Space 1
+          </span>
+          <span className="text-white/80 text-sm mt-2 relative z-10">
+            {isOccupied ? 'Occupied' : 'Available'}
+          </span>
+          {!isOccupied && wsConnected && (
+            <div className="absolute inset-0 bg-green-500/10 animate-pulse"></div>
+          )}
+        </motion.div>
       </div>
 
       <AnimatePresence>
@@ -396,7 +266,7 @@ export default function ParkingSpaceBooking({
 
               <div className="p-5">
                 <h3 className="text-xl font-bold text-gray-800 mb-4">
-                  {paymentVerified ? 'Payment Verified!' : `Payment for Space ${selectedSpace !== null ? selectedSpace + 1 : ''}`}
+                  {paymentVerified ? 'Payment Verified!' : 'Payment for Space 1'}
                 </h3>
                 
                 {paymentVerified ? (
@@ -434,7 +304,7 @@ export default function ParkingSpaceBooking({
                       </div>
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-gray-600">Space Number</span>
-                        <span className="text-gray-800">#{selectedSpace !== null ? selectedSpace + 1 : ''}</span>
+                        <span className="text-gray-800">1</span>
                       </div>
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-gray-600">Date & Time</span>
@@ -509,4 +379,5 @@ export default function ParkingSpaceBooking({
     </div>
   )
 }
+
 

@@ -9,14 +9,16 @@ import { Car } from "lucide-react"
 const ESP32_IP = '192.168.136.162';
 const WEBSOCKET_URL = `ws://${ESP32_IP}:81`;
 
+const TOTAL_SPACES = 30;
+const SENSOR_CONTROLLED_SPACE = 0; // First space is controlled by sensor
+
 export default function LiveMap() {
   const [wsConnected, setWsConnected] = useState(false)
-  const [isOccupied, setIsOccupied] = useState(false)
+  const [spaceStates, setSpaceStates] = useState<boolean[]>(Array(TOTAL_SPACES).fill(false))
   const [lastUpdateTime, setLastUpdateTime] = useState<string>("")
   const [wsInstance, setWsInstance] = useState<WebSocket | null>(null)
   const [reconnectAttempts, setReconnectAttempts] = useState(0)
   const [connectionStatus, setConnectionStatus] = useState('disconnected')
-  const [distance, setDistance] = useState<number | null>(null)
 
   useEffect(() => {
     let wsInstance: WebSocket;
@@ -53,7 +55,11 @@ export default function LiveMap() {
             const [spaceId, status] = event.data.split(':');
             if (spaceId === '1') {
               const isSpaceOccupied = status === 'true';
-              setIsOccupied(isSpaceOccupied);
+              setSpaceStates(prev => {
+                const newStates = [...prev];
+                newStates[SENSOR_CONTROLLED_SPACE] = isSpaceOccupied;
+                return newStates;
+              });
               setLastUpdateTime(new Date().toLocaleTimeString());
             }
           } catch (error) {
@@ -81,6 +87,15 @@ export default function LiveMap() {
     };
   }, [reconnectAttempts]);
 
+  const handleSpaceClick = (index: number) => {
+    if (index === SENSOR_CONTROLLED_SPACE) return; // Don't allow manual changes to sensor-controlled space
+    setSpaceStates(prev => {
+      const newStates = [...prev];
+      newStates[index] = !newStates[index];
+      return newStates;
+    });
+  };
+
   return (
     <div className="container mx-auto px-4 py-8">
       <h2 className="text-3xl font-bold mb-6 text-white">Live Parking Map</h2>
@@ -92,42 +107,52 @@ export default function LiveMap() {
         )}
       </div>
 
-      <div className="flex justify-center items-center min-h-[60vh]">
-        <motion.div
-          className={`
-            w-64 h-64
-            rounded-2xl flex flex-col items-center justify-center
-            relative overflow-hidden
-            ${isOccupied 
-              ? 'bg-red-500 cursor-not-allowed' 
-              : 'bg-green-500'
-            }
-            transition-all duration-300 ease-out
-            ${wsConnected 
-              ? isOccupied
-                ? 'shadow-[0_0_15px_rgba(239,68,68,0.5)]'
-                : 'shadow-[0_0_15px_rgba(34,197,94,0.5)]'
-              : 'shadow-[0_0_15px_rgba(148,163,184,0.5)]'
-            }
-          `}
-        >
-          <Car 
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+        {spaceStates.map((isOccupied, index) => (
+          <motion.div
+            key={index}
+            onClick={() => handleSpaceClick(index)}
+            whileHover={index !== SENSOR_CONTROLLED_SPACE ? { scale: 1.05 } : undefined}
             className={`
-              w-20 h-20
-              relative z-10
-              ${isOccupied ? 'text-red-100' : 'text-white'}
+              relative w-full pt-[100%] // Square aspect ratio
+              rounded-xl cursor-pointer
+              ${isOccupied 
+                ? 'bg-red-500' 
+                : 'bg-green-500'
+              }
+              ${index === SENSOR_CONTROLLED_SPACE && wsConnected
+                ? isOccupied
+                  ? 'shadow-[0_0_15px_rgba(239,68,68,0.5)]'
+                  : 'shadow-[0_0_15px_rgba(34,197,94,0.5)]'
+                : ''
+              }
+              transition-all duration-300
             `}
-          />
-          <span className="text-white font-medium mt-4 relative z-10 text-xl">
-            Space 1
-          </span>
-          <span className="text-white/80 text-sm mt-2 relative z-10">
-            {isOccupied ? 'Occupied' : 'Available'}
-          </span>
-          {!isOccupied && wsConnected && (
-            <div className="absolute inset-0 bg-green-500/10 animate-pulse"></div>
-          )}
-        </motion.div>
+          >
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <Car 
+                className={`
+                  w-8 h-8 sm:w-10 sm:h-10
+                  ${isOccupied ? 'text-red-100' : 'text-white'}
+                `}
+              />
+              <span className="text-white text-sm mt-2">
+                Space {index + 1}
+              </span>
+              {index === SENSOR_CONTROLLED_SPACE && (
+                <span className="absolute top-2 right-2 flex items-center">
+                  <span className={`
+                    w-2 h-2 rounded-full
+                    ${wsConnected ? 'bg-green-400 animate-pulse' : 'bg-red-400'}
+                  `}/>
+                </span>
+              )}
+            </div>
+            {!isOccupied && index === SENSOR_CONTROLLED_SPACE && wsConnected && (
+              <div className="absolute inset-0 bg-green-500/10 animate-pulse rounded-xl"/>
+            )}
+          </motion.div>
+        ))}
       </div>
     </div>
   )

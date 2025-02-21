@@ -42,14 +42,23 @@ const GlowingBorderCard = ({ children, isConnected = true, isSensorCard = false 
 
 export default function ParkingLocations() {
   const [wsConnected, setWsConnected] = useState(false)
-  const [spaceStates, setSpaceStates] = useState<boolean[]>([false, false, false])
-  const [lastHeartbeat, setLastHeartbeat] = useState<Date | null>(null)
+  const [isOccupied, setIsOccupied] = useState(false)
   const [lastUpdateTime, setLastUpdateTime] = useState<string>("")
-  const [selectedSpace, setSelectedSpace] = useState<number | null>(null)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [wsInstance, setWsInstance] = useState<WebSocket | null>(null)
   const [reconnectAttempts, setReconnectAttempts] = useState(0)
   const [connectionStatus, setConnectionStatus] = useState('disconnected')
+
+  // Add a state for parking locations that will update with sensor data
+  const [locations, setLocations] = useState(parkingLocations);
+
+  // Update Pothys availability whenever sensor state changes
+  useEffect(() => {
+    setLocations(prev => prev.map(location => 
+      location.id === "2" 
+        ? { ...location, availableSpaces: isOccupied ? 0 : 1 }
+        : location
+    ));
+  }, [isOccupied]);
 
   useEffect(() => {
     let wsInstance: WebSocket;
@@ -64,8 +73,6 @@ export default function ParkingLocations() {
           console.log('WebSocket connected');
           setWsConnected(true);
           setConnectionStatus('connected');
-          setErrorMessage('');
-          setReconnectAttempts(0);
         };
 
         wsInstance.onclose = () => {
@@ -84,29 +91,15 @@ export default function ParkingLocations() {
         wsInstance.onmessage = (event) => {
           try {
             console.log('Received message:', event.data);
-            
-            if (event.data === 'heartbeat') {
-              setLastHeartbeat(new Date());
-              return;
-            }
-
             // Handle the string format: "1:true" or "1:false"
             const [spaceId, status] = event.data.split(':');
             if (spaceId === '1') {
               const isSpaceOccupied = status === 'true';
-              setSpaceStates(prev => {
-                const newStates = { ...prev };
-                if (Array.isArray(newStates["2"])) {
-                  newStates["2"] = [...newStates["2"]];
-                  newStates["2"][0] = isSpaceOccupied;
-                }
-                return newStates;
-              });
+              setIsOccupied(isSpaceOccupied);
               setLastUpdateTime(new Date().toLocaleTimeString());
             }
           } catch (error) {
             console.error('Error processing message:', error);
-            setErrorMessage('Error processing update');
           }
         };
 
@@ -130,43 +123,14 @@ export default function ParkingLocations() {
     };
   }, [reconnectAttempts]);
 
-  const handlePayment = () => {
-    if (selectedSpace === null) return;
-    
-    const newStates = [...spaceStates];
-    newStates[selectedSpace] = true;
-    setSpaceStates(newStates);
-    
-    // Broadcast the state change to all connected clients
-    if (wsInstance?.readyState === WebSocket.OPEN) {
-      try {
-        wsInstance.send(JSON.stringify({
-          type: 'spaceUpdate',
-          spaceId: selectedSpace,
-          isOccupied: true,
-          locationId: parkingLocations[0].id,
-          timestamp: new Date().toISOString()
-        }));
-      } catch (error) {
-        console.error('Failed to broadcast space state:', error);
-      }
-    }
-  };
-
   return (
     <div className="container mx-auto px-4 py-8">
       <h2 className="text-2xl font-bold mb-6 text-white">Available Parking Locations</h2>
-      <div className="mb-4 p-4 rounded-lg bg-black/30 text-white">
-        <p>ESP32 Connection Status:</p>
-        <p className="text-sm opacity-70">Attempting to connect to: {WEBSOCKET_URL}</p>
-        <p className="text-sm opacity-70">Status: {wsConnected ? 'Connected' : 'Disconnected'}</p>
-        <p className="text-xs opacity-50 mt-2">If connection fails, verify the ESP32 IP address in Serial Monitor</p>
-      </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {parkingLocations.map((location) => (
+        {locations.map((location) => (
           <motion.div
             key={location.id}
-            whileHover={{ scale: 1.03 }}
+            whileHover={{ scale: location.isSensorEnabled ? 1 : 1.03 }}
             transition={{ type: "spring", stiffness: 300, damping: 10 }}
           >
             {location.isSensorEnabled ? (
@@ -180,24 +144,43 @@ export default function ParkingLocations() {
                         <span className="text-sm text-white font-medium">{wsConnected ? 'Sensor Live' : 'Sensor Offline'}</span>
                       </div>
                     </div>
-                    <CardDescription className="text-white/60">{location.address}</CardDescription>
+                    <CardDescription className="text-white/60">
+                      {location.address}
+                      {location.id === "2" && lastUpdateTime && (
+                        <div className="mt-1 text-xs">Last update: {lastUpdateTime}</div>
+                      )}
+                    </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <p>
-                      Available Spaces: {location.availableSpaces}/{location.totalSpaces}
+                    <p className="flex items-center justify-between">
+                      <span>Available Spaces:</span>
+                      <span className={`font-bold ${location.id === "2" && isOccupied ? 'text-red-500' : 'text-green-500'}`}>
+                        {location.id === "2" ? (isOccupied ? "0" : "1") : location.availableSpaces}/{location.totalSpaces}
+                      </span>
                     </p>
                     <Link
                       href={{
-                        pathname: `/parkingspacebooking/${location.id}`,
+                        pathname: `/parking/${location.id}`,
                         query: { 
                           name: location.name, 
                           totalSpaces: location.totalSpaces,
-                          isSensorEnabled: location.isSensorEnabled
+                          isSensorEnabled: location.isSensorEnabled,
+                          isOccupied: location.id === "2" ? isOccupied : undefined,
+                          wsUrl: location.id === "2" ? WEBSOCKET_URL : undefined
                         }
                       }}
-                      className="mt-4 inline-block bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors"
+                      className={`mt-4 inline-block bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors ${
+                        location.id === "2" && isOccupied
+                          ? 'opacity-50 cursor-not-allowed'
+                          : 'hover:scale-105 transform'
+                      }`}
+                      onClick={e => {
+                        if (location.id === "2" && isOccupied) {
+                          e.preventDefault();
+                        }
+                      }}
                     >
-                      Book Now
+                      {location.id === "2" && isOccupied ? "Space Occupied" : "Book Now"}
                     </Link>
                   </CardContent>
                 </Card>
@@ -215,7 +198,7 @@ export default function ParkingLocations() {
                     </p>
                     <Link
                       href={{
-                        pathname: `/parkingspacebooking/${location.id}`,
+                        pathname: `/parking/${location.id}`,
                         query: { 
                           name: location.name, 
                           totalSpaces: location.totalSpaces,
