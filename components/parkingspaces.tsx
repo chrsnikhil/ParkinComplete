@@ -16,10 +16,8 @@ type ParkingLocation = {
   isSensorEnabled?: boolean
 }
 
-// Replace this with your ESP32's IP address that you got from Serial Monitor
-// Example: const ESP32_IP = '192.168.1.100';
-const ESP32_IP = process.env.NEXT_PUBLIC_ESP32_IP || '192.168.136.162';
-const WEBSOCKET_URL = `${process.env.NODE_ENV === 'production' ? 'wss' : 'ws'}://${ESP32_IP}:81`;
+// WebSocket Configuration
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://192.168.136.162:81';
 
 const parkingLocations: ParkingLocation[] = [
   { id: "1", name: "Express Avenue", address: "Thousand Lights", availableSpaces: 30, totalSpaces: 30 },
@@ -58,11 +56,12 @@ const GlowingBorderCard = ({ children, isConnected = true, isSensorCard = false,
 }
 
 export default function ParkingLocations() {
-  const [wsConnected, setWsConnected] = useState(false)
+  const [isConnected, setIsConnected] = useState(false)
   const [isOccupied, setIsOccupied] = useState(false)
   const [locations, setLocations] = useState(parkingLocations)
   const [showPayment, setShowPayment] = useState<string | null>(null)
   const [paymentVerified, setPaymentVerified] = useState(false)
+  const [reconnectAttempts, setReconnectAttempts] = useState(0)
 
   // Update Pothys availability whenever sensor state changes
   useEffect(() => {
@@ -73,34 +72,64 @@ export default function ParkingLocations() {
     ));
   }, [isOccupied]);
 
-  // WebSocket effect for Pothys
+  // WebSocket effect with reconnection logic
   useEffect(() => {
-    const ws = new WebSocket(WEBSOCKET_URL);
-    
-    ws.onopen = () => {
-      setWsConnected(true);
-    };
-    
-    ws.onmessage = (event) => {
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: NodeJS.Timeout;
+
+    const connect = () => {
       try {
-        const [spaceId, status] = event.data.split(':');
-        if (spaceId === '1') {
-          const spaceOccupied = status === 'true';
-          setIsOccupied(spaceOccupied);
-        }
+        ws = new WebSocket(WS_URL);
+
+        ws.onopen = () => {
+          console.log('WebSocket Connected');
+          setIsConnected(true);
+          setReconnectAttempts(0);
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const [spaceId, status] = event.data.split(':');
+            if (spaceId === '1') {
+              setIsOccupied(status === 'true');
+            }
+          } catch (error) {
+            console.error('Error processing message:', error);
+          }
+        };
+
+        ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          ws?.close();
+        };
+
+        ws.onclose = () => {
+          console.log('WebSocket Disconnected');
+          setIsConnected(false);
+          
+          // Attempt to reconnect with exponential backoff
+          const backoffTime = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+          reconnectTimeout = setTimeout(() => {
+            setReconnectAttempts(prev => prev + 1);
+            connect();
+          }, backoffTime);
+        };
       } catch (error) {
-        console.error('Error processing message:', error);
+        console.error('Connection error:', error);
       }
     };
-    
-    ws.onclose = () => {
-      setWsConnected(false);
-    };
-    
+
+    connect();
+
     return () => {
-      ws.close();
+      if (ws) {
+        ws.close();
+      }
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+      }
     };
-  }, []);
+  }, [reconnectAttempts]);
 
   // Payment verification effect
   useEffect(() => {
@@ -140,13 +169,13 @@ export default function ParkingLocations() {
             transition={{ type: "spring", stiffness: 300, damping: 10 }}
           >
             <GlowingBorderCard 
-              isConnected={location.isSensorEnabled ? wsConnected : true}
+              isConnected={location.isSensorEnabled ? isConnected : true}
               isSensorCard={location.isSensorEnabled}
               isOccupied={location.isSensorEnabled ? isOccupied : false}
             >
               <Card className={`text-white border-none h-full ${
                 location.isSensorEnabled
-                  ? wsConnected
+                  ? isConnected
                     ? isOccupied
                       ? 'bg-red-950'
                       : 'bg-green-950'
@@ -158,8 +187,8 @@ export default function ParkingLocations() {
                   <CardDescription className="text-white/60">{location.address}</CardDescription>
                   {location.isSensorEnabled && (
                     <div className="flex items-center gap-3 bg-black/30 px-4 py-2 rounded-full">
-                      <div className={`w-3 h-3 rounded-full ${wsConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-                      <span className="text-sm text-white">{wsConnected ? 'Sensor Live' : 'Sensor Offline'}</span>
+                      <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                      <span className="text-sm text-white">{isConnected ? 'Sensor Live' : 'Sensor Offline'}</span>
                     </div>
                   )}
                 </CardHeader>
@@ -222,7 +251,7 @@ export default function ParkingLocations() {
                   <ParkingSpaceBooking
                     locationName={locations.find(l => l.id === showPayment)?.name || ""}
                     isSensorEnabled={true}
-                    wsUrl={WEBSOCKET_URL}
+                    wsUrl={WS_URL}
                     initialOccupied={isOccupied}
                   />
                 ) : (
