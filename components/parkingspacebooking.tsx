@@ -37,6 +37,19 @@ export default function ParkingSpaceBooking({
     amount: string;
   } | null>(null);
 
+  // Add countdown timer effect
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (showPayment && !paymentVerified && verificationTimer > 0) {
+      interval = setInterval(() => {
+        setVerificationTimer((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [showPayment, paymentVerified, verificationTimer]);
+
   useEffect(() => {
     if (!wsUrl || !isSensorEnabled) return;
     
@@ -96,6 +109,14 @@ export default function ParkingSpaceBooking({
     setTransactionDetails(null)
   }
 
+  const handleSpaceClick = () => {
+    if (!isOccupied && wsConnected) {
+      setShowPayment(true);
+    }
+  };
+
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent('upi://pay?pa=chrsnikhil-1@oksbi&pn=Nikhil&am=30&cu=INR')}`;
+
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-8">
@@ -123,20 +144,23 @@ export default function ParkingSpaceBooking({
 
       <div className="flex justify-center items-center min-h-[60vh]">
         <motion.div
+          onClick={handleSpaceClick}
           className={`
             w-64 h-64
             rounded-2xl flex flex-col items-center justify-center
             relative overflow-hidden
             ${isOccupied 
               ? 'bg-red-500 cursor-not-allowed' 
-              : 'bg-green-500'
+              : wsConnected
+                ? 'bg-green-500 cursor-pointer hover:bg-green-600'
+                : 'bg-red-500/50 backdrop-blur-sm cursor-not-allowed border border-red-500/30'
             }
             transition-all duration-300 ease-out
             ${wsConnected 
               ? isOccupied
                 ? 'shadow-[0_0_15px_rgba(239,68,68,0.5)]'
                 : 'shadow-[0_0_15px_rgba(34,197,94,0.5)]'
-              : 'shadow-[0_0_15px_rgba(148,163,184,0.5)]'
+              : 'shadow-[0_0_15px_rgba(239,68,68,0.3)]'
             }
           `}
         >
@@ -144,17 +168,20 @@ export default function ParkingSpaceBooking({
             className={`
               w-20 h-20
               relative z-10
-              ${isOccupied ? 'text-red-100' : 'text-white'}
+              ${isOccupied ? 'text-red-100' : wsConnected ? 'text-white' : 'text-red-100/80'}
             `}
           />
           <span className="text-white font-medium mt-4 relative z-10 text-xl">
             Space 1
           </span>
           <span className="text-white/80 text-sm mt-2 relative z-10">
-            {isOccupied ? 'Occupied' : 'Available'}
+            {wsConnected ? (isOccupied ? 'Occupied' : 'Click to Book') : 'Sensor Offline'}
           </span>
           {!isOccupied && wsConnected && (
             <div className="absolute inset-0 bg-green-500/10 animate-pulse"></div>
+          )}
+          {!wsConnected && (
+            <div className="absolute inset-0 bg-gradient-to-br from-red-500/10 via-transparent to-red-500/20"></div>
           )}
         </motion.div>
       </div>
@@ -260,8 +287,8 @@ export default function ParkingSpaceBooking({
                     <div className="flex flex-col items-center">
                       <div className="bg-white p-2 rounded-xl shadow-sm mb-3">
                         <Image 
-                          src="/qr-code.png"
-                          alt="QR Code for payment"
+                          src={qrCodeUrl}
+                          alt="UPI QR Code"
                           width={200}
                           height={200}
                           className="mx-auto mb-4"

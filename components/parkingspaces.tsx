@@ -7,6 +7,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "./ui/
 import { AnimatePresence } from "framer-motion"
 import { X } from "lucide-react"
 import Image from "next/image"
+import SensorSpace from "./SensorSpace"
 
 type ParkingLocation = {
   id: string
@@ -28,17 +29,32 @@ const parkingLocations: ParkingLocation[] = [
   { id: "3", name: "Chennai Airport Parking", address: "Tirusulam", availableSpaces: 30, totalSpaces: 30 },
 ]
 
-const GlowingBorderCard = ({ children, isConnected = true, isSensorCard = false }: { children: React.ReactNode, isConnected?: boolean, isSensorCard?: boolean }) => {
+const GlowingBorderCard = ({ children, isConnected = true, isSensorCard = false, isOccupied = false }: { 
+  children: React.ReactNode, 
+  isConnected?: boolean, 
+  isSensorCard?: boolean,
+  isOccupied?: boolean 
+}) => {
   return (
     <div className="relative group">
       <div className={`absolute -inset-0.5 bg-gradient-to-r ${
         isSensorCard 
           ? isConnected 
-            ? 'from-green-500/30 to-green-500' 
-            : 'from-red-500/30 to-red-500'
+            ? isOccupied
+              ? 'from-red-500/30 to-red-500'
+              : 'from-green-500/30 to-green-500'
+            : 'from-gray-500/30 to-gray-500'
           : 'from-blue-500/30 to-blue-500'
       } rounded-lg opacity-30 group-hover:opacity-100 transition duration-1000 group-hover:duration-200`}></div>
-      <div className="relative bg-black rounded-lg p-0.5">{children}</div>
+      <div className={`relative rounded-lg p-0.5 ${
+        isSensorCard
+          ? isConnected
+            ? isOccupied
+              ? 'bg-red-950'
+              : 'bg-green-950'
+            : 'bg-black'
+          : 'bg-black'
+      }`}>{children}</div>
     </div>
   )
 }
@@ -143,54 +159,88 @@ export default function ParkingLocations() {
             transition={{ type: "spring", stiffness: 300, damping: 10 }}
           >
             {location.isSensorEnabled ? (
-              <GlowingBorderCard isConnected={wsConnected} isSensorCard={true}>
-                <Card className="bg-black text-white border-none h-full">
+              <GlowingBorderCard 
+                isConnected={wsConnected} 
+                isSensorCard={true}
+                isOccupied={isOccupied}
+              >
+                <Card className={`text-white border-none h-full ${
+                  wsConnected
+                    ? isOccupied
+                      ? 'bg-red-950'
+                      : 'bg-green-950'
+                    : 'bg-black'
+                }`}>
                   <CardHeader>
                     <div className="flex justify-between items-center">
                       <CardTitle>{location.name}</CardTitle>
-                      <div className="flex items-center gap-3 bg-black/30 px-4 py-2 rounded-full">
-                        <div className={`w-3 h-3 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'} shadow-lg shadow-current`} />
+                      <motion.div 
+                        className="flex items-center gap-3 bg-black/30 px-4 py-2 rounded-full"
+                        animate={{ opacity: [0.8, 1, 0.8] }}
+                        transition={{ duration: 2, repeat: Infinity }}
+                      >
+                        <motion.div 
+                          className={`w-3 h-3 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'} shadow-lg shadow-current`}
+                          animate={{ scale: [1, 1.2, 1] }}
+                          transition={{ duration: 2, repeat: Infinity }}
+                        />
                         <span className="text-sm text-white font-medium">{wsConnected ? 'Sensor Live' : 'Sensor Offline'}</span>
-                      </div>
+                      </motion.div>
                     </div>
                     <CardDescription className="text-white/60">
                       {location.address}
                       {location.id === "2" && lastUpdateTime && (
-                        <div className="mt-1 text-xs">Last update: {lastUpdateTime}</div>
+                        <motion.div 
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="mt-1 text-xs"
+                        >
+                          Last update: {lastUpdateTime}
+                        </motion.div>
                       )}
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     <p className="flex items-center justify-between">
                       <span>Available Spaces:</span>
-                      <span className={`font-bold ${location.id === "2" && isOccupied ? 'text-red-500' : 'text-green-500'}`}>
-                        {location.id === "2" ? (isOccupied ? "0" : "1") : location.availableSpaces}/{location.totalSpaces}
-                      </span>
+                      <motion.span
+                        key={isOccupied ? "occupied" : "available"}
+                        initial={{ scale: 0.5, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                        className={`font-bold ${isOccupied ? 'text-red-500' : 'text-green-500'}`}
+                      >
+                        {isOccupied ? "0" : "1"}
+                      </motion.span>
                     </p>
-                    <Link
-                      href={{
-                        pathname: `/parking/${location.id}`,
-                        query: { 
-                          name: location.name, 
-                          totalSpaces: location.totalSpaces,
-                          isSensorEnabled: location.isSensorEnabled,
-                          isOccupied: location.id === "2" ? isOccupied : undefined,
-                          wsUrl: location.id === "2" ? WEBSOCKET_URL : undefined
-                        }
-                      }}
-                      className={`mt-4 inline-block bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors ${
-                        location.id === "2" && isOccupied
-                          ? 'opacity-50 cursor-not-allowed'
-                          : 'hover:scale-105 transform'
-                      }`}
-                      onClick={e => {
-                        if (location.id === "2" && isOccupied) {
-                          e.preventDefault();
-                        }
-                      }}
+                    <motion.div
+                      whileHover={!isOccupied ? { scale: 1.02 } : undefined}
+                      whileTap={!isOccupied ? { scale: 0.98 } : undefined}
                     >
-                      {location.id === "2" && isOccupied ? "Space Occupied" : "Book Now"}
-                    </Link>
+                      <Link
+                        href={{
+                          pathname: `/parking/${location.id}`,
+                          query: { 
+                            name: location.name,
+                            isSensorEnabled: true,
+                            isOccupied: isOccupied,
+                            wsUrl: WEBSOCKET_URL
+                          }
+                        }}
+                        className={`mt-4 inline-block w-full text-center bg-blue-500 text-white px-4 py-2 rounded transition-all duration-300 ${
+                          isOccupied
+                            ? 'opacity-50 cursor-not-allowed'
+                            : 'hover:bg-blue-600 hover:shadow-lg hover:-translate-y-0.5'
+                        }`}
+                        onClick={e => {
+                          if (isOccupied) {
+                            e.preventDefault();
+                          }
+                        }}
+                      >
+                        {isOccupied ? "Space Occupied" : "Book Now"}
+                      </Link>
+                    </motion.div>
                   </CardContent>
                 </Card>
               </GlowingBorderCard>
@@ -202,22 +252,29 @@ export default function ParkingLocations() {
                     <CardDescription className="text-white/60">{location.address}</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <p>
-                      Available Spaces: {location.availableSpaces}/{location.totalSpaces}
+                    <p className="flex items-center justify-between">
+                      <span>Available Spaces:</span>
+                      <span className="font-bold text-green-500">
+                        {location.availableSpaces}/{location.totalSpaces}
+                      </span>
                     </p>
-                    <Link
-                      href={{
-                        pathname: `/parking/${location.id}`,
-                        query: { 
-                          name: location.name, 
-                          totalSpaces: location.totalSpaces,
-                          isSensorEnabled: location.isSensorEnabled
-                        }
-                      }}
-                      className="mt-4 w-full inline-block text-center bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors hover:scale-105 transform"
+                    <motion.div
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
                     >
-                      Book Now
-                    </Link>
+                      <Link
+                        href={{
+                          pathname: `/parking/${location.id}`,
+                          query: { 
+                            name: location.name,
+                            totalSpaces: location.totalSpaces
+                          }
+                        }}
+                        className="mt-4 w-full inline-block text-center bg-blue-500 text-white px-4 py-2 rounded transition-all duration-300 hover:bg-blue-600 hover:shadow-lg hover:-translate-y-0.5"
+                      >
+                        Book Now
+                      </Link>
+                    </motion.div>
                   </CardContent>
                 </Card>
               </GlowingBorderCard>
