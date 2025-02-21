@@ -6,12 +6,19 @@ export const metadata: Metadata = {
   description: 'Book your parking space',
 }
 
-export default function ParkingPage({
-  params,
-  searchParams,
-}: {
+type PageProps = {
   params: { id: string }
   searchParams: { [key: string]: string | string[] | undefined }
-}) {
-  return <ParkingPageClient params={params} searchParams={searchParams} />
+}
+
+export default async function ParkingPage({ params, searchParams }: PageProps) {
+  // Ensure params is handled as async even if we're not doing data fetching
+  const resolvedParams = await Promise.resolve(params);
+  
+  return (
+    <ParkingPageClient 
+      params={resolvedParams}
+      searchParams={searchParams}
+    />
+  )
 } 

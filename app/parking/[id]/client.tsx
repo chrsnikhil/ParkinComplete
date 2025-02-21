@@ -3,12 +3,12 @@
 import ParkingSpaceBookingForPayment from '@/components/parkingspacebookingforpayment'
 import SensorSpace from '@/components/SensorSpace'
 
-interface Props {
+type ClientProps = {
   params: { id: string }
   searchParams: { [key: string]: string | string[] | undefined }
 }
 
-export default function ParkingPageClient({ params, searchParams }: Props) {
+export default function ParkingPageClient({ params, searchParams }: ClientProps) {
   const locationName = searchParams.name as string
   const rawTotalSpaces = searchParams.totalSpaces
   const totalSpaces = typeof rawTotalSpaces === 'string' 
