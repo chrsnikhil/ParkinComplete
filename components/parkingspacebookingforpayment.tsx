@@ -4,6 +4,7 @@ import React from "react"
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Car, X } from "lucide-react"
+import Image from "next/image"
 
 type ParkingSpaceBookingProps = {
   locationName: string
@@ -276,12 +277,13 @@ export default function ParkingSpaceBookingForPayment({
 
                     <div className="flex flex-col items-center">
                       <div className="bg-white p-2 rounded-xl shadow-sm mb-3">
-                        <img 
+                        <Image 
                           src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent('upi://pay?pa=chrsnikhil-1@oksbi&pn=Nikhil&am=30&cu=INR')}`}
                           alt="UPI QR Code"
                           width={200}
                           height={200}
                           className="mx-auto mb-4"
+                          unoptimized
                         />
                       </div>
                       <div className="w-full space-y-3">

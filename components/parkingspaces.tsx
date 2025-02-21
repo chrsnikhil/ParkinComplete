@@ -1,13 +1,11 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { motion } from "framer-motion"
+import { motion, AnimatePresence } from "framer-motion"
 import Link from "next/link"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "./ui/card"
-import { AnimatePresence } from "framer-motion"
 import { X } from "lucide-react"
 import Image from "next/image"
-import SensorSpace from "./SensorSpace"
 
 type ParkingLocation = {
   id: string
