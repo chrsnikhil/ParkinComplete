@@ -3,13 +3,12 @@
 import ParkingSpaceBooking from '@/components/parkingspacebooking'
 import ParkingSpaceBookingForPayment from '@/components/parkingspacebookingforpayment'
 
-export default function ParkingPage({ 
-  params,
-  searchParams
-}: {
+interface PageProps {
   params: { id: string }
   searchParams: { [key: string]: string | string[] | undefined }
-}) {
+}
+
+export default function ParkingPage({ params, searchParams }: PageProps) {
   const locationName = searchParams.name as string
   const totalSpaces = parseInt(searchParams.totalSpaces as string)
   const isSensorEnabled = searchParams.isSensorEnabled === 'true'
