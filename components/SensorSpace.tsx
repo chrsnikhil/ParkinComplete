@@ -1,42 +1,41 @@
 "use client"
 
-import { useEffect, useState } from 'react'
-import { FaCar } from 'react-icons/fa'
+import { useState, useEffect } from 'react'
+import { motion } from 'framer-motion'
+import { Car } from 'lucide-react'
 
-interface SensorSpaceProps {
+type SensorSpaceProps = {
   wsUrl: string
   initialOccupied: boolean
 }
 
 export default function SensorSpace({ wsUrl, initialOccupied }: SensorSpaceProps) {
-  const [wsConnected, setWsConnected] = useState(false)
+  const [isConnected, setIsConnected] = useState(false)
   const [isOccupied, setIsOccupied] = useState(initialOccupied)
-  const [lastUpdateTime, setLastUpdateTime] = useState<string>('')
-  const [showPayment, setShowPayment] = useState(false)
-  const [paymentVerified, setPaymentVerified] = useState(false)
-  const [timeLeft, setTimeLeft] = useState(300) // 5 minutes in seconds
+  const [lastUpdate, setLastUpdate] = useState<string | null>(null)
 
   useEffect(() => {
     const ws = new WebSocket(wsUrl)
 
     ws.onopen = () => {
-      console.log('WebSocket Connected')
-      setWsConnected(true)
+      setIsConnected(true)
     }
 
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data)
-        setIsOccupied(data.occupied)
-        setLastUpdateTime(new Date().toLocaleTimeString())
+        const [spaceId, status] = event.data.split(':')
+        if (spaceId === '1') {
+          setIsOccupied(status === 'true')
+          setLastUpdate(new Date().toLocaleTimeString())
+        }
       } catch (error) {
-        console.error('Error parsing WebSocket message:', error)
+        console.error('Error processing message:', error)
       }
     }
 
     ws.onclose = () => {
-      console.log('WebSocket Disconnected')
-      setWsConnected(false)
+      setIsConnected(false)
+      setLastUpdate(null)
     }
 
     return () => {
@@ -44,99 +43,75 @@ export default function SensorSpace({ wsUrl, initialOccupied }: SensorSpaceProps
     }
   }, [wsUrl])
 
-  useEffect(() => {
-    let timer: NodeJS.Timeout
-    if (showPayment && !paymentVerified) {
-      timer = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            clearInterval(timer)
-            setShowPayment(false)
-            return 300
-          }
-          return prev - 1
-        })
-      }, 1000)
-    }
-    return () => clearInterval(timer)
-  }, [showPayment, paymentVerified])
-
-  const handleSpaceClick = () => {
-    if (!isOccupied && wsConnected) {
-      setShowPayment(true)
-    }
-  }
-
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=chrsnikhil-1@oksbi&pn=Nikhil&am=30&cu=INR`
-
   return (
-    <div className="flex flex-col items-center gap-8">
-      <div className="text-white text-center mb-4">
-        <p>Connection Status: {wsConnected ? 'Connected' : 'Disconnected'}</p>
-        {lastUpdateTime && <p>Last Update: {lastUpdateTime}</p>}
-      </div>
-
-      <div
-        onClick={handleSpaceClick}
+    <div className="relative">
+      <motion.div
         className={`
-          relative w-64 h-64 rounded-lg flex items-center justify-center cursor-pointer
-          transition-all duration-300 transform hover:scale-105
+          w-64 h-64
+          rounded-2xl flex flex-col items-center justify-center
+          relative overflow-hidden
           ${isOccupied 
-            ? 'bg-red-500 cursor-not-allowed' 
-            : wsConnected 
-              ? 'bg-green-500 hover:bg-green-600' 
-              : 'bg-gray-500 cursor-not-allowed'
+            ? 'bg-red-500' 
+            : isConnected
+              ? 'bg-green-500'
+              : 'bg-gray-500'
           }
+          transition-colors duration-300
         `}
       >
-        <FaCar className="text-white text-6xl" />
-        {!isOccupied && wsConnected && (
-          <div className="absolute bottom-4 text-white font-semibold">
-            Click to Book
-          </div>
+        <Car 
+          className={`
+            w-20 h-20 mb-4
+            ${isOccupied 
+              ? 'text-red-100' 
+              : isConnected
+                ? 'text-white'
+                : 'text-gray-300'
+            }
+          `}
+        />
+        <span className="text-white font-medium text-xl mb-2">
+          Space 1
+        </span>
+        <span className="text-white/80 text-sm">
+          {isConnected 
+            ? isOccupied 
+              ? 'Currently Occupied'
+              : 'Available'
+            : 'Sensor Offline'
+          }
+        </span>
+        {isConnected && (
+          <motion.div
+            className="absolute inset-0"
+            initial={false}
+            animate={{ 
+              backgroundColor: isOccupied 
+                ? 'rgba(239, 68, 68, 0.1)' 
+                : 'rgba(34, 197, 94, 0.1)' 
+            }}
+          />
         )}
-      </div>
+      </motion.div>
 
-      {showPayment && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-8 rounded-lg max-w-md w-full">
-            <h3 className="text-2xl font-bold mb-4">Complete Payment</h3>
-            <p className="mb-4">Scan the QR code to pay ₹30</p>
-            <div className="flex justify-center mb-4">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={qrCodeUrl}
-                alt="Payment QR Code"
-                width={200}
-                height={200}
-              />
-            </div>
-            <p className="text-center mb-4">
-              Time remaining: {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
-            </p>
-            <div className="flex justify-end gap-4">
-              <button
-                onClick={() => {
-                  setShowPayment(false)
-                  setTimeLeft(300)
-                }}
-                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  setPaymentVerified(true)
-                  setShowPayment(false)
-                }}
-                className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
-              >
-                Verify Payment
-              </button>
-            </div>
-          </div>
+      <div className="absolute -bottom-12 left-1/2 -translate-x-1/2 whitespace-nowrap">
+        <div className="flex items-center gap-2">
+          <div 
+            className={`
+              w-2 h-2 rounded-full
+              ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}
+            `}
+          />
+          <span className={`text-sm ${isConnected ? 'text-green-500' : 'text-red-500'}`}>
+            {isConnected ? 'Sensor Connected' : 'Sensor Offline'}
+          </span>
+          {lastUpdate && (
+            <span className="text-gray-400 text-sm ml-2">
+              Last update: {lastUpdate}
+            </span>
+          )}
         </div>
-      )}
+      </div>
     </div>
   )
 } 

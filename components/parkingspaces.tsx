@@ -6,6 +6,9 @@ import Link from "next/link"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "./ui/card"
 import { X } from "lucide-react"
 import Image from "next/image"
+import ParkingSpaceBooking from "./parkingspacebooking"
+import ParkingSpaceBookingForPayment from "./parkingspacebookingforpayment"
+import ParkingSpaceGridBooking from "./parkingspacebookinggrid"
 
 type ParkingLocation = {
   id: string
@@ -69,7 +72,7 @@ export default function ParkingLocations() {
     id: string;
     timestamp: string;
     amount: string;
-  } | null>(null);
+  } | null>(null)
 
   // Update Pothys availability whenever sensor state changes
   useEffect(() => {
@@ -156,258 +159,97 @@ export default function ParkingLocations() {
             whileHover={{ scale: location.isSensorEnabled ? 1 : 1.03 }}
             transition={{ type: "spring", stiffness: 300, damping: 10 }}
           >
-            {location.isSensorEnabled ? (
-              <GlowingBorderCard 
-                isConnected={wsConnected} 
-                isSensorCard={true}
-                isOccupied={isOccupied}
-              >
-                <Card className={`text-white border-none h-full ${
-                  wsConnected
+            <GlowingBorderCard 
+              isConnected={location.isSensorEnabled ? wsConnected : true}
+              isSensorCard={location.isSensorEnabled}
+              isOccupied={location.isSensorEnabled ? isOccupied : false}
+            >
+              <Card className={`text-white border-none h-full ${
+                location.isSensorEnabled
+                  ? wsConnected
                     ? isOccupied
                       ? 'bg-red-950'
                       : 'bg-green-950'
                     : 'bg-black'
-                }`}>
-                  <CardHeader>
-                    <div className="flex justify-between items-center">
-                      <CardTitle>{location.name}</CardTitle>
-                      <motion.div 
-                        className="flex items-center gap-3 bg-black/30 px-4 py-2 rounded-full"
-                        animate={{ opacity: [0.8, 1, 0.8] }}
-                        transition={{ duration: 2, repeat: Infinity }}
-                      >
-                        <motion.div 
-                          className={`w-3 h-3 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'} shadow-lg shadow-current`}
-                          animate={{ scale: [1, 1.2, 1] }}
-                          transition={{ duration: 2, repeat: Infinity }}
-                        />
-                        <span className="text-sm text-white font-medium">{wsConnected ? 'Sensor Live' : 'Sensor Offline'}</span>
-                      </motion.div>
+                  : 'bg-black'
+              }`}>
+                <CardHeader>
+                  <CardTitle>{location.name}</CardTitle>
+                  <CardDescription className="text-white/60">{location.address}</CardDescription>
+                  {location.isSensorEnabled && (
+                    <div className="flex items-center gap-3 bg-black/30 px-4 py-2 rounded-full">
+                      <div className={`w-3 h-3 rounded-full ${wsConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                      <span className="text-sm text-white">{wsConnected ? 'Sensor Live' : 'Sensor Offline'}</span>
                     </div>
-                    <CardDescription className="text-white/60">
-                      {location.address}
-                      {location.id === "2" && lastUpdateTime && (
-                        <motion.div 
-                          initial={{ opacity: 0, y: -10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="mt-1 text-xs"
-                        >
-                          Last update: {lastUpdateTime}
-                        </motion.div>
-                      )}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="flex items-center justify-between">
-                      <span>Available Spaces:</span>
-                      <motion.span
-                        key={isOccupied ? "occupied" : "available"}
-                        initial={{ scale: 0.5, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                        className={`font-bold ${isOccupied ? 'text-red-500' : 'text-green-500'}`}
-                      >
-                        {isOccupied ? "0" : "1"}
-                      </motion.span>
-                    </p>
-                    <motion.div
-                      whileHover={!isOccupied ? { scale: 1.02 } : undefined}
-                      whileTap={!isOccupied ? { scale: 0.98 } : undefined}
+                  )}
+                </CardHeader>
+                <CardContent>
+                  <p className="flex items-center justify-between">
+                    <span>Available Spaces:</span>
+                    <span className="font-bold text-white">
+                      {location.availableSpaces}/{location.totalSpaces}
+                    </span>
+                  </p>
+                  <motion.div
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    <button
+                      onClick={() => setShowPayment(location.id)}
+                      disabled={location.isSensorEnabled && isOccupied}
+                      className={`
+                        mt-4 w-full inline-block text-center px-4 py-2 rounded
+                        ${location.isSensorEnabled && isOccupied
+                          ? 'bg-gray-500 cursor-not-allowed'
+                          : 'bg-blue-500 hover:bg-blue-600 hover:shadow-lg hover:-translate-y-0.5'
+                        }
+                        transition-all duration-300 text-white
+                      `}
                     >
-                      <Link
-                        href={{
-                          pathname: `/parking/${location.id}`,
-                          query: { 
-                            name: location.name,
-                            isSensorEnabled: true,
-                            isOccupied: isOccupied,
-                            wsUrl: WEBSOCKET_URL
-                          }
-                        }}
-                        className={`mt-4 inline-block w-full text-center bg-blue-500 text-white px-4 py-2 rounded transition-all duration-300 ${
-                          isOccupied
-                            ? 'opacity-50 cursor-not-allowed'
-                            : 'hover:bg-blue-600 hover:shadow-lg hover:-translate-y-0.5'
-                        }`}
-                        onClick={e => {
-                          if (isOccupied) {
-                            e.preventDefault();
-                          }
-                        }}
-                      >
-                        {isOccupied ? "Space Occupied" : "Book Now"}
-                      </Link>
-                    </motion.div>
-                  </CardContent>
-                </Card>
-              </GlowingBorderCard>
-            ) : (
-              <GlowingBorderCard isSensorCard={false}>
-                <Card className="bg-black text-white border-none h-full">
-                  <CardHeader>
-                    <CardTitle>{location.name}</CardTitle>
-                    <CardDescription className="text-white/60">{location.address}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="flex items-center justify-between">
-                      <span>Available Spaces:</span>
-                      <span className="font-bold text-green-500">
-                        {location.availableSpaces}/{location.totalSpaces}
-                      </span>
-                    </p>
-                    <motion.div
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                    >
-                      <Link
-                        href={{
-                          pathname: `/parking/${location.id}`,
-                          query: { 
-                            name: location.name,
-                            totalSpaces: location.totalSpaces
-                          }
-                        }}
-                        className="mt-4 w-full inline-block text-center bg-blue-500 text-white px-4 py-2 rounded transition-all duration-300 hover:bg-blue-600 hover:shadow-lg hover:-translate-y-0.5"
-                      >
-                        Book Now
-                      </Link>
-                    </motion.div>
-                  </CardContent>
-                </Card>
-              </GlowingBorderCard>
-            )}
+                      {location.isSensorEnabled && isOccupied ? 'Space Occupied' : 'Book Now'}
+                    </button>
+                  </motion.div>
+                </CardContent>
+              </Card>
+            </GlowingBorderCard>
           </motion.div>
         ))}
       </div>
 
       <AnimatePresence>
-        {showPayment && showPayment !== "2" && (
+        {showPayment && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 backdrop-blur-sm z-50"
+            className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 backdrop-blur-xl z-50"
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-2xl w-full max-w-md relative"
+              className="bg-[#030303] rounded-2xl w-full max-w-4xl relative"
             >
               <button 
                 onClick={handleClosePayment}
-                className="absolute -top-3 -right-3 bg-white text-gray-600 hover:text-gray-800 rounded-full p-2 transition-all duration-200 hover:scale-110 z-50 shadow-lg hover:shadow-xl"
+                className="absolute top-4 right-4 bg-white/10 text-white/80 hover:bg-white/20 hover:text-white rounded-full p-2 transition-all duration-200 hover:scale-110 z-50"
               >
-                <X size={20} />
+                <X size={24} />
               </button>
 
               <div className="p-5">
-                <h3 className="text-xl font-bold text-gray-800 mb-4">
-                  {paymentVerified ? 'Payment Verified!' : 'Payment Details'}
-                </h3>
-                
-                {paymentVerified ? (
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="bg-green-50 p-6 rounded-xl text-center"
-                  >
-                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <motion.div
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        transition={{ type: "spring", stiffness: 200, damping: 10 }}
-                      >
-                        <svg className="w-10 h-10 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </motion.div>
-                    </div>
-                    <h4 className="text-lg font-semibold text-green-800 mb-2">Payment Successful!</h4>
-                    <p className="text-green-600 mb-4">Your parking space has been booked.</p>
-                    
-                    <div className="bg-white rounded-lg p-4 shadow-sm space-y-3">
-                      <div className="flex justify-between items-center text-sm">
-                        <span className="text-gray-600">Transaction ID</span>
-                        <span className="font-mono text-gray-800">{transactionDetails?.id}</span>
-                      </div>
-                      <div className="flex justify-between items-center text-sm">
-                        <span className="text-gray-600">Amount Paid</span>
-                        <span className="font-semibold text-gray-800">{transactionDetails?.amount}</span>
-                      </div>
-                      <div className="flex justify-between items-center text-sm">
-                        <span className="text-gray-600">Location</span>
-                        <span className="text-gray-800">
-                          {locations.find(l => l.id === showPayment)?.name}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center text-sm">
-                        <span className="text-gray-600">Date & Time</span>
-                        <span className="text-gray-800">{transactionDetails?.timestamp}</span>
-                      </div>
-                      <div className="pt-3 border-t">
-                        <p className="text-xs text-gray-500">
-                          A confirmation has been sent to your registered email address.
-                        </p>
-                      </div>
-                    </div>
-                  </motion.div>
+                {locations.find(l => l.id === showPayment)?.isSensorEnabled ? (
+                  <ParkingSpaceBooking
+                    locationName={locations.find(l => l.id === showPayment)?.name || ""}
+                    isSensorEnabled={true}
+                    wsUrl={WEBSOCKET_URL}
+                    initialOccupied={isOccupied}
+                  />
                 ) : (
-                  <div className="bg-gray-50 p-4 rounded-xl">
-                    <div className="bg-white rounded-lg p-3 shadow-sm mb-4">
-                      <p className="text-base font-medium text-gray-600">Amount to Pay</p>
-                      <p className="text-2xl font-bold text-blue-600">₹30</p>
-                      <div className="mt-2 text-sm text-gray-500">
-                        {verificationTimer > 30 ? (
-                          <span>Verifying payment in: {verificationTimer}s</span>
-                        ) : verificationTimer > 0 ? (
-                          <span className="text-yellow-600">Payment processing... {verificationTimer}s</span>
-                        ) : (
-                          <span className="text-blue-500">Finalizing transaction...</span>
-                        )}
-                      </div>
-                      <div className="w-full h-1 bg-gray-200 rounded-full mt-2 overflow-hidden">
-                        <motion.div
-                          className="h-full bg-blue-500"
-                          initial={{ width: "100%" }}
-                          animate={{ width: "0%" }}
-                          transition={{ duration: 60, ease: "linear" }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col items-center">
-                      <div className="bg-white p-2 rounded-xl shadow-sm mb-3">
-                        <Image 
-                          src="/qr-code.png"
-                          alt="QR Code for payment"
-                          width={200}
-                          height={200}
-                          className="mx-auto mb-4"
-                        />
-                      </div>
-                      <div className="w-full space-y-3">
-                        <div>
-                          <a
-                            href="upi://pay?pa=chrsnikhil-1@oksbi&pn=Nikhil&am=30&cu=INR"
-                            className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors font-medium"
-                          >
-                            Pay ₹30 with UPI
-                          </a>
-                          <p className="text-xs text-gray-500 mt-1 text-center">
-                            {/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) 
-                              ? "Click to open your UPI app"
-                              : "Scan QR code with your UPI app"}
-                          </p>
-                        </div>
-
-                        <p className="text-xs text-gray-500 text-center">
-                          Payment will be verified automatically
-                        </p>
-                      </div>
-                    </div>
-                  </div>
+                  <ParkingSpaceBookingForPayment
+                    locationName={locations.find(l => l.id === showPayment)?.name || ""}
+                    totalSpaces={locations.find(l => l.id === showPayment)?.totalSpaces || 30}
+                  />
                 )}
               </div>
             </motion.div>
