@@ -1,31 +1,40 @@
 "use client"
 
-import { use } from "react"
-import ParkingSpaceBooking from "@/components/parkingspacebooking"
+import { use } from 'react'
+import ParkingSpaceBooking from '@/components/parkingspacebooking'
+import ParkingSpaceBookingForPayment from '@/components/parkingspacebookingforpayment'
 
-export default function ParkingSpaceBookingPage({
+export default function ParkingPage({ 
   params,
-  searchParams,
+  searchParams
 }: {
   params: { id: string }
-  searchParams: { 
-    name: string
-    totalSpaces: string
-    isSensorEnabled: string
-    wsUrl?: string
-    isOccupied?: string
-  }
+  searchParams: { [key: string]: string | string[] | undefined }
 }) {
-  return (
-    <div className="min-h-screen bg-[#030303]">
+  const locationName = searchParams.name as string
+  const totalSpaces = parseInt(searchParams.totalSpaces as string)
+  const isSensorEnabled = searchParams.isSensorEnabled === 'true'
+  const wsUrl = searchParams.wsUrl as string
+  const isOccupied = searchParams.isOccupied === 'true'
+
+  // Use ParkingSpaceBooking for Pothys (id: 2) and ParkingSpaceBookingForPayment for others
+  if (params.id === "2") {
+    return (
       <ParkingSpaceBooking
-        locationId={params.id}
-        locationName={searchParams.name}
-        totalSpaces={parseInt(searchParams.totalSpaces)}
-        isSensorEnabled={searchParams.isSensorEnabled === 'true'}
-        wsUrl={searchParams.wsUrl}
-        initialOccupied={searchParams.isOccupied === 'true'}
+        locationName={locationName}
+        isSensorEnabled={isSensorEnabled}
+        wsUrl={wsUrl}
+        initialOccupied={isOccupied}
       />
-    </div>
+    )
+  }
+
+  return (
+    <ParkingSpaceBookingForPayment
+      locationId={params.id}
+      locationName={locationName}
+      totalSpaces={totalSpaces}
+      isSensorEnabled={false}
+    />
   )
 } 

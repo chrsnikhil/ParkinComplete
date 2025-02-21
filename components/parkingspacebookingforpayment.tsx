@@ -4,97 +4,230 @@ import React from "react"
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Car, X } from "lucide-react"
-import Image from 'next/image'
+import Image from "next/image"
 
 // Replace this with your ESP32's IP address that you got from Serial Monitor
 // Example: const ESP32_IP = '192.168.1.100';
 const ESP32_IP = '192.168.136.162';
 const WEBSOCKET_URL = `ws://${ESP32_IP}:81`;
 
+const SENSOR_CONTROLLED_SPACE = 0; // First space is controlled by sensor
+
 type ParkingSpaceBookingProps = {
+  locationId: string
   locationName: string
+  totalSpaces: number
   isSensorEnabled?: boolean
   wsUrl?: string
   initialOccupied?: boolean
 }
 
-export default function ParkingSpaceBooking({ 
+type SpaceState = 'available' | 'selected' | 'booked';
+
+export default function ParkingSpaceBookingForPayment({ 
+  locationId, 
   locationName,
+  totalSpaces,
   isSensorEnabled,
   wsUrl = WEBSOCKET_URL,
   initialOccupied = false
 }: ParkingSpaceBookingProps) {
   const [wsConnected, setWsConnected] = useState(false)
-  const [isOccupied, setIsOccupied] = useState(initialOccupied || false)
-  const [lastUpdateTime, setLastUpdateTime] = useState<string | null>(null)
+  const [isOccupied, setIsOccupied] = useState(initialOccupied)
+  const [lastUpdateTime, setLastUpdateTime] = useState<string>("")
+  const [wsInstance, setWsInstance] = useState<WebSocket | null>(null)
+  const [reconnectAttempts, setReconnectAttempts] = useState(0)
   const [connectionStatus, setConnectionStatus] = useState('disconnected')
   const [showPayment, setShowPayment] = useState(false)
   const [paymentVerified, setPaymentVerified] = useState(false)
   const [verificationTimer, setVerificationTimer] = useState(60)
+  const [selectedSpace, setSelectedSpace] = useState<number | null>(null)
+  const [spaceStates, setSpaceStates] = useState<SpaceState[]>(Array(totalSpaces).fill('available'))
   const [transactionDetails, setTransactionDetails] = useState<{
     id: string;
     timestamp: string;
     amount: string;
+    spaceNumber: number;
   } | null>(null);
 
   useEffect(() => {
-    if (!wsUrl || !isSensorEnabled) return;
-    
-    const ws = new WebSocket(wsUrl);
-    
-    ws.onopen = () => {
-      setWsConnected(true);
-      setConnectionStatus('connected');
-    };
-    
-    ws.onmessage = (event) => {
+    if (!isSensorEnabled) return;
+
+    let wsInstance: WebSocket;
+    let reconnectTimer: NodeJS.Timeout;
+
+    function connectWebSocket() {
       try {
-        const [spaceId, status] = event.data.split(':');
-        if (spaceId === '1') {
-          const isSpaceOccupied = status === 'true';
-          setIsOccupied(isSpaceOccupied);
-          setLastUpdateTime(new Date().toLocaleTimeString());
-        }
+        wsInstance = new WebSocket(wsUrl);
+        setWsInstance(wsInstance);
+
+        wsInstance.onopen = () => {
+          console.log('WebSocket connected');
+          setWsConnected(true);
+          setConnectionStatus('connected');
+        };
+
+        wsInstance.onclose = () => {
+          console.log('WebSocket disconnected');
+          setWsConnected(false);
+          setConnectionStatus('disconnected');
+          
+          // Attempt to reconnect
+          const backoffTime = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
+          reconnectTimer = setTimeout(() => {
+            setReconnectAttempts(prev => prev + 1);
+            connectWebSocket();
+          }, backoffTime);
+        };
+
+        wsInstance.onmessage = (event) => {
+          try {
+            console.log('Received message:', event.data);
+            // Handle the string format: "1:true" or "1:false"
+            const [spaceId, status] = event.data.split(':');
+            if (spaceId === '1') {
+              const isSpaceOccupied = status === 'true';
+              setIsOccupied(isSpaceOccupied);
+              setLastUpdateTime(new Date().toLocaleTimeString());
+              // Ensure connection status is set when receiving messages
+              setWsConnected(true);
+              setConnectionStatus('connected');
+            }
+          } catch (error) {
+            console.error('Error processing message:', error);
+          }
+        };
+
+        return wsInstance;
       } catch (error) {
-        console.error('Error processing message:', error);
+        console.error('Failed to establish WebSocket connection:', error);
+        setWsConnected(false);
+        setConnectionStatus('disconnected');
+        return null;
       }
-    };
-    
-    ws.onclose = () => {
-      setWsConnected(false);
-      setConnectionStatus('disconnected');
-      setLastUpdateTime(null);
-    };
+    }
+
+    const ws = connectWebSocket();
     
     return () => {
-      ws.close();
+      if (wsInstance) {
+        wsInstance.close();
+      }
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
     };
-  }, [wsUrl, isSensorEnabled]);
+  }, [wsUrl, isSensorEnabled, reconnectAttempts]);
 
+  // Payment verification timer effect
   useEffect(() => {
     let timer: NodeJS.Timeout;
+    let countdownTimer: NodeJS.Timeout;
+
     if (showPayment && !paymentVerified) {
       timer = setTimeout(() => {
         const timestamp = new Date().toLocaleString();
         setTransactionDetails({
           id: `PK${Date.now().toString().slice(-8)}`,
           timestamp,
-          amount: '₹30.00'
+          amount: '₹30.00',
+          spaceNumber: selectedSpace! + 1
         });
         setPaymentVerified(true);
+        
+        // Mark the space as booked after successful payment
+        if (selectedSpace !== null) {
+          setSpaceStates(prev => {
+            const newStates = [...prev];
+            newStates[selectedSpace] = 'booked';
+            return newStates;
+          });
+        }
       }, 30000);
+
+      countdownTimer = setInterval(() => {
+        setVerificationTimer(prev => prev > 0 ? prev - 1 : 0);
+      }, 1000);
     }
+
     return () => {
-      if (timer) clearTimeout(timer);
+      clearTimeout(timer);
+      clearInterval(countdownTimer);
+      setVerificationTimer(60);
     };
-  }, [showPayment, paymentVerified]);
+  }, [showPayment, selectedSpace]);
+
+  const handleSpaceClick = (index: number) => {
+    if (spaceStates[index] === 'booked') return;
+    
+    // If clicking the same space, deselect it and close payment
+    if (selectedSpace === index) {
+      setSelectedSpace(null);
+      setSpaceStates(prev => {
+        const newStates = [...prev];
+        newStates[index] = 'available';
+        return newStates;
+      });
+      setShowPayment(false);
+      return;
+    }
+
+    // If a different space was previously selected, make it available again
+    if (selectedSpace !== null) {
+      setSpaceStates(prev => {
+        const newStates = [...prev];
+        newStates[selectedSpace] = 'available';
+        return newStates;
+      });
+    }
+
+    // Select the new space and show payment
+    setSelectedSpace(index);
+    setSpaceStates(prev => {
+      const newStates = [...prev];
+      newStates[index] = 'selected';
+      return newStates;
+    });
+    setShowPayment(true);
+    setPaymentVerified(false);
+    setVerificationTimer(60);
+    setTransactionDetails(null);
+  }
 
   const handleClosePayment = () => {
     setShowPayment(false)
     setPaymentVerified(false)
     setVerificationTimer(60)
     setTransactionDetails(null)
+    
+    // If payment wasn't verified, make the space available again
+    if (!paymentVerified && selectedSpace !== null) {
+      setSpaceStates(prev => {
+        const newStates = [...prev];
+        newStates[selectedSpace] = 'available';
+        return newStates;
+      });
+      setSelectedSpace(null);
+    }
   }
+
+  // Update the space display to reflect real-time sensor state
+  const getSpaceClassName = (index: number) => {
+    if (!isSensorEnabled) return 'bg-green-500 hover:bg-green-600';
+    if (index === 0) { // First space is controlled by sensor
+      return isOccupied 
+        ? 'bg-red-500 cursor-not-allowed'
+        : 'bg-green-500 hover:bg-green-600';
+    }
+    return 'bg-green-500 hover:bg-green-600';
+  };
+
+  // Update the space display to show real-time status
+  const isSpaceAvailable = (index: number) => {
+    if (!isSensorEnabled) return true;
+    if (index === 0) return !isOccupied;
+    return true;
+  };
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -121,42 +254,54 @@ export default function ParkingSpaceBooking({
         )}
       </div>
 
-      <div className="flex justify-center items-center min-h-[60vh]">
-        <motion.div
-          className={`
-            w-64 h-64
-            rounded-2xl flex flex-col items-center justify-center
-            relative overflow-hidden
-            ${isOccupied 
-              ? 'bg-red-500 cursor-not-allowed' 
-              : 'bg-green-500'
-            }
-            transition-all duration-300 ease-out
-            ${wsConnected 
-              ? isOccupied
-                ? 'shadow-[0_0_15px_rgba(239,68,68,0.5)]'
-                : 'shadow-[0_0_15px_rgba(34,197,94,0.5)]'
-              : 'shadow-[0_0_15px_rgba(148,163,184,0.5)]'
-            }
-          `}
-        >
-          <Car 
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 mb-8">
+        {Array.from({ length: totalSpaces }).map((_, index) => (
+          <motion.div
+            key={index}
+            onClick={() => {
+              if (spaceStates[index] !== 'booked') {
+                handleSpaceClick(index);
+              }
+            }}
+            whileHover={spaceStates[index] !== 'booked' ? { scale: 1.05 } : undefined}
             className={`
-              w-20 h-20
-              relative z-10
-              ${isOccupied ? 'text-red-100' : 'text-white'}
+              relative w-full pt-[100%] // Square aspect ratio
+              rounded-xl cursor-pointer
+              ${spaceStates[index] === 'booked' 
+                ? 'bg-gray-500 cursor-not-allowed' 
+                : spaceStates[index] === 'selected'
+                  ? 'bg-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.5)]'
+                  : 'bg-green-500 hover:bg-green-600'
+              }
+              transition-all duration-300
             `}
-          />
-          <span className="text-white font-medium mt-4 relative z-10 text-xl">
-            Space 1
-          </span>
-          <span className="text-white/80 text-sm mt-2 relative z-10">
-            {isOccupied ? 'Occupied' : 'Available'}
-          </span>
-          {!isOccupied && wsConnected && (
-            <div className="absolute inset-0 bg-green-500/10 animate-pulse"></div>
-          )}
-        </motion.div>
+          >
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <Car 
+                className={`
+                  w-8 h-8 sm:w-10 sm:h-10
+                  ${spaceStates[index] === 'booked' 
+                    ? 'text-gray-300' 
+                    : spaceStates[index] === 'selected'
+                      ? 'text-yellow-100'
+                      : 'text-white'
+                  }
+                `}
+              />
+              <span className="text-white text-sm mt-2">
+                Space {index + 1}
+              </span>
+              <span className="text-xs mt-1 text-white/80">
+                {spaceStates[index] === 'booked' 
+                  ? 'Booked' 
+                  : spaceStates[index] === 'selected'
+                    ? 'Selected'
+                    : 'Click to Book'
+                }
+              </span>
+            </div>
+          </motion.div>
+        ))}
       </div>
 
       <AnimatePresence>
@@ -182,7 +327,7 @@ export default function ParkingSpaceBooking({
 
               <div className="p-5">
                 <h3 className="text-xl font-bold text-gray-800 mb-4">
-                  {paymentVerified ? 'Payment Verified!' : 'Payment for Space 1'}
+                  {paymentVerified ? 'Payment Verified!' : 'Payment Details'}
                 </h3>
                 
                 {paymentVerified ? (
@@ -220,7 +365,7 @@ export default function ParkingSpaceBooking({
                       </div>
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-gray-600">Space Number</span>
-                        <span className="text-gray-800">1</span>
+                        <span className="text-gray-800">{transactionDetails?.spaceNumber}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-gray-600">Date & Time</span>
@@ -259,9 +404,9 @@ export default function ParkingSpaceBooking({
 
                     <div className="flex flex-col items-center">
                       <div className="bg-white p-2 rounded-xl shadow-sm mb-3">
-                        <Image 
-                          src="/qr-code.png"
-                          alt="QR Code for payment"
+                        <img 
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent('upi://pay?pa=chrsnikhil-1@oksbi&pn=Nikhil&am=30&cu=INR')}`}
+                          alt="UPI QR Code"
                           width={200}
                           height={200}
                           className="mx-auto mb-4"
@@ -297,5 +442,3 @@ export default function ParkingSpaceBooking({
     </div>
   )
 }
-
-

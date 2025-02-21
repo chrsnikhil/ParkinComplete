@@ -4,6 +4,9 @@ import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
 import Link from "next/link"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "./ui/card"
+import { AnimatePresence } from "framer-motion"
+import { X } from "lucide-react"
+import Image from "next/image"
 
 type ParkingLocation = {
   id: string
@@ -43,13 +46,16 @@ const GlowingBorderCard = ({ children, isConnected = true, isSensorCard = false 
 export default function ParkingLocations() {
   const [wsConnected, setWsConnected] = useState(false)
   const [isOccupied, setIsOccupied] = useState(false)
-  const [lastUpdateTime, setLastUpdateTime] = useState<string>("")
-  const [wsInstance, setWsInstance] = useState<WebSocket | null>(null)
-  const [reconnectAttempts, setReconnectAttempts] = useState(0)
-  const [connectionStatus, setConnectionStatus] = useState('disconnected')
-
-  // Add a state for parking locations that will update with sensor data
-  const [locations, setLocations] = useState(parkingLocations);
+  const [lastUpdateTime, setLastUpdateTime] = useState<string | null>(null)
+  const [locations, setLocations] = useState(parkingLocations)
+  const [showPayment, setShowPayment] = useState<string | null>(null)
+  const [paymentVerified, setPaymentVerified] = useState(false)
+  const [verificationTimer, setVerificationTimer] = useState(60)
+  const [transactionDetails, setTransactionDetails] = useState<{
+    id: string;
+    timestamp: string;
+    amount: string;
+  } | null>(null);
 
   // Update Pothys availability whenever sensor state changes
   useEffect(() => {
@@ -60,68 +66,71 @@ export default function ParkingLocations() {
     ));
   }, [isOccupied]);
 
+  // WebSocket effect for Pothys
   useEffect(() => {
-    let wsInstance: WebSocket;
-    let reconnectTimer: NodeJS.Timeout;
-
-    function connectWebSocket() {
-      try {
-        wsInstance = new WebSocket(WEBSOCKET_URL);
-        setWsInstance(wsInstance);
-
-        wsInstance.onopen = () => {
-          console.log('WebSocket connected');
-          setWsConnected(true);
-          setConnectionStatus('connected');
-        };
-
-        wsInstance.onclose = () => {
-          console.log('WebSocket disconnected');
-          setWsConnected(false);
-          setConnectionStatus('disconnected');
-          
-          // Attempt to reconnect
-          const backoffTime = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
-          reconnectTimer = setTimeout(() => {
-            setReconnectAttempts(prev => prev + 1);
-            connectWebSocket();
-          }, backoffTime);
-        };
-
-        wsInstance.onmessage = (event) => {
-          try {
-            console.log('Received message:', event.data);
-            // Handle the string format: "1:true" or "1:false"
-            const [spaceId, status] = event.data.split(':');
-            if (spaceId === '1') {
-              const isSpaceOccupied = status === 'true';
-              setIsOccupied(isSpaceOccupied);
-              setLastUpdateTime(new Date().toLocaleTimeString());
-            }
-          } catch (error) {
-            console.error('Error processing message:', error);
-          }
-        };
-
-        return wsInstance;
-      } catch (error) {
-        console.error('Failed to establish WebSocket connection:', error);
-        setWsConnected(false);
-        return null;
-      }
-    }
-
-    const ws = connectWebSocket();
+    const ws = new WebSocket(WEBSOCKET_URL);
     
-    return () => {
-      if (wsInstance) {
-        wsInstance.close();
-      }
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
+    ws.onopen = () => {
+      setWsConnected(true);
+    };
+    
+    ws.onmessage = (event) => {
+      try {
+        const [spaceId, status] = event.data.split(':');
+        if (spaceId === '1') {
+          const spaceOccupied = status === 'true';
+          setIsOccupied(spaceOccupied);
+          setLastUpdateTime(new Date().toLocaleTimeString());
+        }
+      } catch (error) {
+        console.error('Error processing message:', error);
       }
     };
-  }, [reconnectAttempts]);
+    
+    ws.onclose = () => {
+      setWsConnected(false);
+      setLastUpdateTime(null);
+    };
+    
+    return () => {
+      ws.close();
+    };
+  }, []);
+
+  // Payment verification effect
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (showPayment && !paymentVerified) {
+      timer = setTimeout(() => {
+        const timestamp = new Date().toLocaleString();
+        setTransactionDetails({
+          id: `PK${Date.now().toString().slice(-8)}`,
+          timestamp,
+          amount: '₹30.00'
+        });
+        setPaymentVerified(true);
+        
+        // Update available spaces after successful payment
+        if (showPayment !== "2") { // Don't update Pothys
+          setLocations(prev => prev.map(location => 
+            location.id === showPayment
+              ? { ...location, availableSpaces: Math.max(0, location.availableSpaces - 1) }
+              : location
+          ));
+        }
+      }, 30000);
+    }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [showPayment, paymentVerified]);
+
+  const handleClosePayment = () => {
+    setShowPayment(null)
+    setPaymentVerified(false)
+    setVerificationTimer(60)
+    setTransactionDetails(null)
+  }
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -205,7 +214,7 @@ export default function ParkingLocations() {
                           isSensorEnabled: location.isSensorEnabled
                         }
                       }}
-                      className="mt-4 inline-block bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors"
+                      className="mt-4 w-full inline-block text-center bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors hover:scale-105 transform"
                     >
                       Book Now
                     </Link>
@@ -216,6 +225,140 @@ export default function ParkingLocations() {
           </motion.div>
         ))}
       </div>
+
+      <AnimatePresence>
+        {showPayment && showPayment !== "2" && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 backdrop-blur-sm z-50"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-2xl w-full max-w-md relative"
+            >
+              <button 
+                onClick={handleClosePayment}
+                className="absolute -top-3 -right-3 bg-white text-gray-600 hover:text-gray-800 rounded-full p-2 transition-all duration-200 hover:scale-110 z-50 shadow-lg hover:shadow-xl"
+              >
+                <X size={20} />
+              </button>
+
+              <div className="p-5">
+                <h3 className="text-xl font-bold text-gray-800 mb-4">
+                  {paymentVerified ? 'Payment Verified!' : 'Payment Details'}
+                </h3>
+                
+                {paymentVerified ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-green-50 p-6 rounded-xl text-center"
+                  >
+                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <motion.div
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        transition={{ type: "spring", stiffness: 200, damping: 10 }}
+                      >
+                        <svg className="w-10 h-10 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </motion.div>
+                    </div>
+                    <h4 className="text-lg font-semibold text-green-800 mb-2">Payment Successful!</h4>
+                    <p className="text-green-600 mb-4">Your parking space has been booked.</p>
+                    
+                    <div className="bg-white rounded-lg p-4 shadow-sm space-y-3">
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600">Transaction ID</span>
+                        <span className="font-mono text-gray-800">{transactionDetails?.id}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600">Amount Paid</span>
+                        <span className="font-semibold text-gray-800">{transactionDetails?.amount}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600">Location</span>
+                        <span className="text-gray-800">
+                          {locations.find(l => l.id === showPayment)?.name}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600">Date & Time</span>
+                        <span className="text-gray-800">{transactionDetails?.timestamp}</span>
+                      </div>
+                      <div className="pt-3 border-t">
+                        <p className="text-xs text-gray-500">
+                          A confirmation has been sent to your registered email address.
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <div className="bg-gray-50 p-4 rounded-xl">
+                    <div className="bg-white rounded-lg p-3 shadow-sm mb-4">
+                      <p className="text-base font-medium text-gray-600">Amount to Pay</p>
+                      <p className="text-2xl font-bold text-blue-600">₹30</p>
+                      <div className="mt-2 text-sm text-gray-500">
+                        {verificationTimer > 30 ? (
+                          <span>Verifying payment in: {verificationTimer}s</span>
+                        ) : verificationTimer > 0 ? (
+                          <span className="text-yellow-600">Payment processing... {verificationTimer}s</span>
+                        ) : (
+                          <span className="text-blue-500">Finalizing transaction...</span>
+                        )}
+                      </div>
+                      <div className="w-full h-1 bg-gray-200 rounded-full mt-2 overflow-hidden">
+                        <motion.div
+                          className="h-full bg-blue-500"
+                          initial={{ width: "100%" }}
+                          animate={{ width: "0%" }}
+                          transition={{ duration: 60, ease: "linear" }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-center">
+                      <div className="bg-white p-2 rounded-xl shadow-sm mb-3">
+                        <Image 
+                          src="/qr-code.png"
+                          alt="QR Code for payment"
+                          width={200}
+                          height={200}
+                          className="mx-auto mb-4"
+                        />
+                      </div>
+                      <div className="w-full space-y-3">
+                        <div>
+                          <a
+                            href="upi://pay?pa=chrsnikhil-1@oksbi&pn=Nikhil&am=30&cu=INR"
+                            className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors font-medium"
+                          >
+                            Pay ₹30 with UPI
+                          </a>
+                          <p className="text-xs text-gray-500 mt-1 text-center">
+                            {/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) 
+                              ? "Click to open your UPI app"
+                              : "Scan QR code with your UPI app"}
+                          </p>
+                        </div>
+
+                        <p className="text-xs text-gray-500 text-center">
+                          Payment will be verified automatically
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

@@ -1,15 +1,8 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { Inter } from "next/font/google"
 import Image from "next/image"
 import { cn } from "@/lib/utils"
-
-const inter = Inter({
-  subsets: ["latin"],
-  weight: ["500"],
-  variable: "--font-inter",
-})
 
 function ElegantShape({
   className,

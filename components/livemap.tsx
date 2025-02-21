@@ -15,77 +15,41 @@ const SENSOR_CONTROLLED_SPACE = 0; // First space is controlled by sensor
 export default function LiveMap() {
   const [wsConnected, setWsConnected] = useState(false)
   const [spaceStates, setSpaceStates] = useState<boolean[]>(Array(TOTAL_SPACES).fill(false))
-  const [lastUpdateTime, setLastUpdateTime] = useState<string>("")
-  const [wsInstance, setWsInstance] = useState<WebSocket | null>(null)
-  const [reconnectAttempts, setReconnectAttempts] = useState(0)
-  const [connectionStatus, setConnectionStatus] = useState('disconnected')
+  const [lastUpdateTime, setLastUpdateTime] = useState<string | null>(null)
 
   useEffect(() => {
-    let wsInstance: WebSocket;
-    let reconnectTimer: NodeJS.Timeout;
-
-    function connectWebSocket() {
-      try {
-        wsInstance = new WebSocket(WEBSOCKET_URL);
-        setWsInstance(wsInstance);
-
-        wsInstance.onopen = () => {
-          console.log('WebSocket connected');
-          setWsConnected(true);
-          setConnectionStatus('connected');
-        };
-
-        wsInstance.onclose = () => {
-          console.log('WebSocket disconnected');
-          setWsConnected(false);
-          setConnectionStatus('disconnected');
-          
-          // Attempt to reconnect
-          const backoffTime = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
-          reconnectTimer = setTimeout(() => {
-            setReconnectAttempts(prev => prev + 1);
-            connectWebSocket();
-          }, backoffTime);
-        };
-
-        wsInstance.onmessage = (event) => {
-          try {
-            console.log('Received message:', event.data);
-            // Handle the string format: "1:true" or "1:false"
-            const [spaceId, status] = event.data.split(':');
-            if (spaceId === '1') {
-              const isSpaceOccupied = status === 'true';
-              setSpaceStates(prev => {
-                const newStates = [...prev];
-                newStates[SENSOR_CONTROLLED_SPACE] = isSpaceOccupied;
-                return newStates;
-              });
-              setLastUpdateTime(new Date().toLocaleTimeString());
-            }
-          } catch (error) {
-            console.error('Error processing message:', error);
-          }
-        };
-
-        return wsInstance;
-      } catch (error) {
-        console.error('Failed to establish WebSocket connection:', error);
-        setWsConnected(false);
-        return null;
-      }
-    }
-
-    const ws = connectWebSocket();
+    const ws = new WebSocket(WEBSOCKET_URL);
     
-    return () => {
-      if (wsInstance) {
-        wsInstance.close();
-      }
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
+    ws.onopen = () => {
+      setWsConnected(true);
+    };
+    
+    ws.onmessage = (event) => {
+      try {
+        const [spaceId, status] = event.data.split(':');
+        if (spaceId === '1') {
+          const spaceOccupied = status === 'true';
+          setSpaceStates(prev => {
+            const newStates = [...prev];
+            newStates[SENSOR_CONTROLLED_SPACE] = spaceOccupied;
+            return newStates;
+          });
+          setLastUpdateTime(new Date().toLocaleTimeString());
+        }
+      } catch (error) {
+        console.error('Error processing message:', error);
       }
     };
-  }, [reconnectAttempts]);
+    
+    ws.onclose = () => {
+      setWsConnected(false);
+      setLastUpdateTime(null);
+    };
+    
+    return () => {
+      ws.close();
+    };
+  }, []);
 
   const handleSpaceClick = (index: number) => {
     if (index === SENSOR_CONTROLLED_SPACE) return; // Don't allow manual changes to sensor-controlled space
@@ -101,7 +65,7 @@ export default function LiveMap() {
       <h2 className="text-3xl font-bold mb-6 text-white">Live Parking Map</h2>
       <div className="mb-4 p-4 rounded-lg bg-black/30 text-white">
         <p>ESP32 Sensor Status:</p>
-        <p className="text-sm opacity-70">Status: {connectionStatus}</p>
+        <p className="text-sm opacity-70">Status: {wsConnected ? 'Connected' : 'Disconnected'}</p>
         {lastUpdateTime && (
           <p className="text-sm opacity-70">Last Update: {lastUpdateTime}</p>
         )}
