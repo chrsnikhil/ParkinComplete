@@ -2,13 +2,10 @@
 
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import Link from "next/link"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "./ui/card"
 import { X } from "lucide-react"
-import Image from "next/image"
 import ParkingSpaceBooking from "./parkingspacebooking"
 import ParkingSpaceBookingForPayment from "./parkingspacebookingforpayment"
-import ParkingSpaceGridBooking from "./parkingspacebookinggrid"
 
 type ParkingLocation = {
   id: string
@@ -63,16 +60,9 @@ const GlowingBorderCard = ({ children, isConnected = true, isSensorCard = false,
 export default function ParkingLocations() {
   const [wsConnected, setWsConnected] = useState(false)
   const [isOccupied, setIsOccupied] = useState(false)
-  const [lastUpdateTime, setLastUpdateTime] = useState<string | null>(null)
   const [locations, setLocations] = useState(parkingLocations)
   const [showPayment, setShowPayment] = useState<string | null>(null)
   const [paymentVerified, setPaymentVerified] = useState(false)
-  const [verificationTimer, setVerificationTimer] = useState(60)
-  const [transactionDetails, setTransactionDetails] = useState<{
-    id: string;
-    timestamp: string;
-    amount: string;
-  } | null>(null)
 
   // Update Pothys availability whenever sensor state changes
   useEffect(() => {
@@ -97,7 +87,6 @@ export default function ParkingLocations() {
         if (spaceId === '1') {
           const spaceOccupied = status === 'true';
           setIsOccupied(spaceOccupied);
-          setLastUpdateTime(new Date().toLocaleTimeString());
         }
       } catch (error) {
         console.error('Error processing message:', error);
@@ -106,7 +95,6 @@ export default function ParkingLocations() {
     
     ws.onclose = () => {
       setWsConnected(false);
-      setLastUpdateTime(null);
     };
     
     return () => {
@@ -119,12 +107,6 @@ export default function ParkingLocations() {
     let timer: NodeJS.Timeout;
     if (showPayment && !paymentVerified) {
       timer = setTimeout(() => {
-        const timestamp = new Date().toLocaleString();
-        setTransactionDetails({
-          id: `PK${Date.now().toString().slice(-8)}`,
-          timestamp,
-          amount: '₹30.00'
-        });
         setPaymentVerified(true);
         
         // Update available spaces after successful payment
@@ -145,8 +127,6 @@ export default function ParkingLocations() {
   const handleClosePayment = () => {
     setShowPayment(null)
     setPaymentVerified(false)
-    setVerificationTimer(60)
-    setTransactionDetails(null)
   }
 
   return (
