@@ -18,8 +18,8 @@ type ParkingLocation = {
 
 // Replace this with your ESP32's IP address that you got from Serial Monitor
 // Example: const ESP32_IP = '192.168.1.100';
-const ESP32_IP = '192.168.136.162';
-const WEBSOCKET_URL = `ws://${ESP32_IP}:81`;
+const ESP32_IP = process.env.NEXT_PUBLIC_ESP32_IP || '192.168.136.162';
+const WEBSOCKET_URL = `${process.env.NODE_ENV === 'production' ? 'wss' : 'ws'}://${ESP32_IP}:81`;
 
 const parkingLocations: ParkingLocation[] = [
   { id: "1", name: "Express Avenue", address: "Thousand Lights", availableSpaces: 30, totalSpaces: 30 },
