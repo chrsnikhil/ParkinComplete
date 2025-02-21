@@ -4,40 +4,18 @@ import React from "react"
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Car, X } from "lucide-react"
-import Image from "next/image"
-
-// Replace this with your ESP32's IP address that you got from Serial Monitor
-// Example: const ESP32_IP = '192.168.1.100';
-const ESP32_IP = '192.168.136.162';
-const WEBSOCKET_URL = `ws://${ESP32_IP}:81`;
-
-const SENSOR_CONTROLLED_SPACE = 0; // First space is controlled by sensor
 
 type ParkingSpaceBookingProps = {
-  locationId: string
   locationName: string
   totalSpaces: number
-  isSensorEnabled?: boolean
-  wsUrl?: string
-  initialOccupied?: boolean
 }
 
 type SpaceState = 'available' | 'selected' | 'booked';
 
 export default function ParkingSpaceBookingForPayment({ 
-  locationId, 
   locationName,
   totalSpaces,
-  isSensorEnabled,
-  wsUrl = WEBSOCKET_URL,
-  initialOccupied = false
 }: ParkingSpaceBookingProps) {
-  const [wsConnected, setWsConnected] = useState(false)
-  const [isOccupied, setIsOccupied] = useState(initialOccupied)
-  const [lastUpdateTime, setLastUpdateTime] = useState<string>("")
-  const [wsInstance, setWsInstance] = useState<WebSocket | null>(null)
-  const [reconnectAttempts, setReconnectAttempts] = useState(0)
-  const [connectionStatus, setConnectionStatus] = useState('disconnected')
   const [showPayment, setShowPayment] = useState(false)
   const [paymentVerified, setPaymentVerified] = useState(false)
   const [verificationTimer, setVerificationTimer] = useState(60)
@@ -49,75 +27,6 @@ export default function ParkingSpaceBookingForPayment({
     amount: string;
     spaceNumber: number;
   } | null>(null);
-
-  useEffect(() => {
-    if (!isSensorEnabled) return;
-
-    let wsInstance: WebSocket;
-    let reconnectTimer: NodeJS.Timeout;
-
-    function connectWebSocket() {
-      try {
-        wsInstance = new WebSocket(wsUrl);
-        setWsInstance(wsInstance);
-
-        wsInstance.onopen = () => {
-          console.log('WebSocket connected');
-          setWsConnected(true);
-          setConnectionStatus('connected');
-        };
-
-        wsInstance.onclose = () => {
-          console.log('WebSocket disconnected');
-          setWsConnected(false);
-          setConnectionStatus('disconnected');
-          
-          // Attempt to reconnect
-          const backoffTime = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
-          reconnectTimer = setTimeout(() => {
-            setReconnectAttempts(prev => prev + 1);
-            connectWebSocket();
-          }, backoffTime);
-        };
-
-        wsInstance.onmessage = (event) => {
-          try {
-            console.log('Received message:', event.data);
-            // Handle the string format: "1:true" or "1:false"
-            const [spaceId, status] = event.data.split(':');
-            if (spaceId === '1') {
-              const isSpaceOccupied = status === 'true';
-              setIsOccupied(isSpaceOccupied);
-              setLastUpdateTime(new Date().toLocaleTimeString());
-              // Ensure connection status is set when receiving messages
-              setWsConnected(true);
-              setConnectionStatus('connected');
-            }
-          } catch (error) {
-            console.error('Error processing message:', error);
-          }
-        };
-
-        return wsInstance;
-      } catch (error) {
-        console.error('Failed to establish WebSocket connection:', error);
-        setWsConnected(false);
-        setConnectionStatus('disconnected');
-        return null;
-      }
-    }
-
-    const ws = connectWebSocket();
-    
-    return () => {
-      if (wsInstance) {
-        wsInstance.close();
-      }
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-      }
-    };
-  }, [wsUrl, isSensorEnabled, reconnectAttempts]);
 
   // Payment verification timer effect
   useEffect(() => {
@@ -155,7 +64,7 @@ export default function ParkingSpaceBookingForPayment({
       clearInterval(countdownTimer);
       setVerificationTimer(60);
     };
-  }, [showPayment, selectedSpace]);
+  }, [showPayment, selectedSpace, paymentVerified]);
 
   const handleSpaceClick = (index: number) => {
     if (spaceStates[index] === 'booked') return;
@@ -211,47 +120,10 @@ export default function ParkingSpaceBookingForPayment({
     }
   }
 
-  // Update the space display to reflect real-time sensor state
-  const getSpaceClassName = (index: number) => {
-    if (!isSensorEnabled) return 'bg-green-500 hover:bg-green-600';
-    if (index === 0) { // First space is controlled by sensor
-      return isOccupied 
-        ? 'bg-red-500 cursor-not-allowed'
-        : 'bg-green-500 hover:bg-green-600';
-    }
-    return 'bg-green-500 hover:bg-green-600';
-  };
-
-  // Update the space display to show real-time status
-  const isSpaceAvailable = (index: number) => {
-    if (!isSensorEnabled) return true;
-    if (index === 0) return !isOccupied;
-    return true;
-  };
-
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-8">
         <h2 className="text-3xl font-bold text-white">{locationName}</h2>
-        {isSensorEnabled && (
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-3 bg-black/30 px-4 py-2 rounded-full">
-              <div className={`w-3 h-3 rounded-full ${
-                connectionStatus === 'connected'
-                  ? 'bg-green-500 animate-pulse shadow-[0_0_10px_2px_rgba(34,197,94,0.6)] ring-2 ring-green-500/50' 
-                  : 'bg-red-500'
-              } shadow-lg shadow-current`} />
-              <span className={`text-sm font-medium ${connectionStatus === 'connected' ? 'text-green-400' : 'text-red-400'}`}>
-                {connectionStatus === 'connected' ? 'Sensor Live' : 'Sensor Offline'}
-              </span>
-            </div>
-            {lastUpdateTime && connectionStatus === 'connected' && (
-              <div className="text-sm text-green-400">
-                Last update: {lastUpdateTime}
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 mb-8">

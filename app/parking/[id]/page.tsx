@@ -1,6 +1,5 @@
 "use client"
 
-import { use } from 'react'
 import ParkingSpaceBooking from '@/components/parkingspacebooking'
 import ParkingSpaceBookingForPayment from '@/components/parkingspacebookingforpayment'
 
@@ -31,10 +30,8 @@ export default function ParkingPage({
 
   return (
     <ParkingSpaceBookingForPayment
-      locationId={params.id}
       locationName={locationName}
       totalSpaces={totalSpaces}
-      isSensorEnabled={false}
     />
   )
 } 
