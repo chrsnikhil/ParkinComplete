@@ -69,5 +69,6 @@ Example data format:
 Feel free to fork and improve the project! Open an issue for any suggestions or bug reports.
 
 ## License
-MIT License
+NC- Not for Commercial Use.
+Developed by Chris Nikhil Fernando.
 
